@@ -1,0 +1,63 @@
+{{- /* Tailored-resume draft fragment. Rendered standalone for hx-swap=outerHTML
+       after GET /ui/jobs/{id}/draft or POST /ui/jobs/{id}/draft. Empty state
+       (NoDraft=true) shows a "draft now" button that POSTs back to this same
+       endpoint to trigger DeepSeek and swap in the populated fragment. */ -}}
+<div class="draft-fragment" id="draft-{{ .JobID }}">
+  {{- if .NoDraft }}
+  <div class="draft-empty">
+    <p>No draft yet for <code>{{ .JobID }}</code> (profile <code>{{ .Profile }}</code>).</p>
+    <button class="draft-trigger"
+            hx-post="/ui/jobs/{{ .JobID }}/draft"
+            hx-vals='{"profile":"{{ .Profile }}"}'
+            hx-target="#draft-{{ .JobID }}"
+            hx-swap="outerHTML"
+            hx-indicator="#draft-spinner-{{ .JobID }}">
+      Draft now (calls DeepSeek, ~60s)
+    </button>
+    <span id="draft-spinner-{{ .JobID }}" class="htmx-indicator">working…</span>
+  </div>
+  {{- else }}
+  <header class="draft-meta">
+    <span class="meta-item"><b>kept</b> {{ .KeptCount }}/{{ .TotalCount }}</span>
+    <span class="meta-item"><b>model</b> {{ .Model }}</span>
+    <span class="meta-item"><b>resume</b> {{ .ResumeVersion }}</span>
+    <span class="meta-item"><b>drafted</b> {{ .DraftedAt }}</span>
+    <span class="meta-item"><b>cost</b> ${{ printf "%.4f" .CostUSD }}</span>
+    <button class="draft-refresh"
+            hx-post="/ui/jobs/{{ .JobID }}/draft"
+            hx-vals='{"profile":"{{ .Profile }}"}'
+            hx-target="#draft-{{ .JobID }}"
+            hx-swap="outerHTML"
+            hx-confirm="Re-draft? This will call DeepSeek again (~60s, ~$0.005)."
+            hx-indicator="#draft-spinner-{{ .JobID }}">
+      re-draft
+    </button>
+    <span id="draft-spinner-{{ .JobID }}" class="htmx-indicator">working…</span>
+  </header>
+  <form class="draft-form"
+        hx-post="/api/v1/jobs/{{ .JobID }}/finalize-resume"
+        hx-ext="json-enc"
+        hx-vals='{"profile":"{{ .Profile }}","resume_version":"{{ .ResumeVersion }}"}'>
+    {{- range .Roles }}
+    <fieldset class="draft-role" data-role-id="{{ .RoleID }}">
+      <legend>
+        {{- if .RoleTitle }}<span class="role-title">{{ .RoleTitle }}</span>{{ end }}
+        {{- if .RoleCompany }} <span class="role-company">— {{ .RoleCompany }}</span>{{ end }}
+        {{- if .RoleDates }} <span class="role-dates">({{ .RoleDates }})</span>{{ end }}
+      </legend>
+      {{- range .Bullets }}
+      <label class="draft-bullet" data-keep="{{ .Keep }}">
+        <input type="checkbox" name="kept_bullet_ids" value="{{ .CompositeID }}"
+               {{- if .Keep }} checked{{ end }}>
+        <span class="bullet-text">{{ .Text }}</span>
+        {{- if .Reason }}
+        <span class="bullet-reason">{{ .Reason }}</span>
+        {{- end }}
+      </label>
+      {{- end }}
+    </fieldset>
+    {{- end }}
+    <button type="submit" class="draft-finalize">Finalize selection</button>
+  </form>
+  {{- end }}
+</div>

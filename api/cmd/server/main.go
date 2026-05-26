@@ -63,6 +63,7 @@ func main() {
 		Finalizations: finalsRepo,
 		DeepSeek:      dsClient,
 		Pool:          pool,
+		Renderer:      renderer,
 	}
 
 	r := chi.NewRouter()
@@ -93,8 +94,17 @@ func main() {
 	})
 
 	r.Route("/ui", func(r chi.Router) {
-		r.Use(middleware.Timeout(30 * time.Second))
-		r.Post("/jobs/{id}/status-row", uh.StatusRow)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(30 * time.Second))
+			r.Post("/jobs/{id}/status-row", uh.StatusRow)
+			r.Get("/jobs/{id}/draft", rh.DraftFragment)
+		})
+		// HTML trigger for a fresh DeepSeek draft — same 120s budget as the
+		// JSON endpoint above.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(120 * time.Second))
+			r.Post("/jobs/{id}/draft", rh.DraftFragmentTrigger)
+		})
 	})
 
 	r.Handle("/*", http.FileServer(http.Dir(webDir)))
