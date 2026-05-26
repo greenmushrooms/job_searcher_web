@@ -1,0 +1,11 @@
+{{- /* One application-status row. Rendered standalone for hx-swap=outerHTML
+       after a POST /ui/jobs/{id}/status-row, or inline elsewhere. */ -}}
+<div class="job-status-row"
+     id="status-{{ .JobID }}-{{ .SysProfile }}"
+     data-status="{{ .Status }}">
+  <span class="status-badge status-{{ .Status }}">{{ .Status }}</span>
+  <span class="status-meta">updated {{ .UpdatedAt }}</span>
+  {{- if .Notes }}
+  <div class="status-notes">{{ .Notes }}</div>
+  {{- end }}
+</div>

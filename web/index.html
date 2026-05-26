@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>job_searcher_web</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { margin: 0 0 .25rem; }
+  .sub { color: #666; margin-bottom: 1.25rem; }
+  form { display: flex; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+  label { color: #555; font-size: 12px; }
+  input, select { padding: .35rem .5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+  .job { border: 1px solid #e3e3e3; border-radius: 6px; padding: .75rem 1rem; margin-bottom: .5rem; }
+  .job .row1 { display: flex; justify-content: space-between; gap: 1rem; }
+  .job h3 { margin: 0; font-size: 15px; }
+  .job h3 a { color: #1a4ed8; text-decoration: none; }
+  .job .meta { color: #666; font-size: 12px; margin-top: .25rem; }
+  .score { font-weight: 600; color: #0a7d2e; white-space: nowrap; }
+  .status { font-size: 11px; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: #eef; color: #339; margin-left: .5rem; }
+  .empty { color: #999; padding: 2rem; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>job_searcher_web</h1>
+  <div class="sub">Good jobs from the pipeline, latest first.</div>
+
+  <form hx-get="/api/v1/jobs"
+        hx-trigger="load, change, submit"
+        hx-target="#jobs"
+        hx-swap="innerHTML"
+        hx-ext=""
+        onsubmit="event.preventDefault()">
+    <label>profile
+      <select name="profile">
+        <option>Slava</option>
+        <option>Cait</option>
+        <option>Kezia</option>
+        <option>Ray</option>
+      </select>
+    </label>
+    <label>min score
+      <input type="number" name="min_score" value="6.9" step="0.1" min="0" max="10" style="width:64px">
+    </label>
+    <label>limit
+      <input type="number" name="limit" value="50" min="1" max="200" style="width:64px">
+    </label>
+  </form>
+
+  <div id="jobs" class="empty">loading…</div>
+
+<script>
+  // Render the JSON response from /api/v1/jobs into the #jobs div.
+  document.body.addEventListener('htmx:beforeSwap', (e) => {
+    if (e.detail.target.id !== 'jobs') return;
+    e.detail.shouldSwap = true;
+    try {
+      const data = JSON.parse(e.detail.serverResponse);
+      e.detail.serverResponse = renderJobs(data);
+    } catch {
+      e.detail.serverResponse = '<div class="empty">bad response</div>';
+    }
+  });
+
+  function renderJobs(data) {
+    const jobs = data.jobs || [];
+    if (!jobs.length) return '<div class="empty">no jobs match.</div>';
+    return jobs.map(j => {
+      const comp = j.compensation
+        ? `${j.compensation.min}–${j.compensation.max} ${j.compensation.currency || ''} ${j.compensation.interval || ''}`
+        : '';
+      const status = j.application ? `<span class="status">${j.application.status}</span>` : '';
+      return `
+        <div class="job">
+          <div class="row1">
+            <h3><a href="${j.url || '#'}" target="_blank" rel="noopener">${esc(j.title || '(no title)')}</a>${status}</h3>
+            <div class="score">${j.score?.toFixed(1) ?? '—'}</div>
+          </div>
+          <div class="meta">
+            ${esc(j.company || '')} · ${esc(j.location || '')}${j.is_remote ? ' · remote' : ''}
+            · posted ${j.date_posted || '?'} · evaluated ${j.eval_date?.slice(0,10) || '?'}
+            ${comp ? ' · ' + esc(comp) : ''}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+</script>
+</body>
+</html>
