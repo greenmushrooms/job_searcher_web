@@ -51,9 +51,16 @@ func (h *ResumeHandler) ResumePDF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prefer the stored per-bullet snapshot (carries manual edits + accepted AI
+	// rewrites); fall back to the kept-id selection for legacy rows.
+	selections := groupByRole(saved.KeptBulletIDs)
+	if final := parseFinalBullets(saved.Bullets); len(final) > 0 {
+		selections = applyFinalBullets(doc, final)
+	}
+
 	body, _ := json.Marshal(map[string]any{
 		"resume":     doc,
-		"selections": groupByRole(saved.KeptBulletIDs),
+		"selections": selections,
 	})
 
 	url := resumeHTMXURL() + "/render-pdf"
@@ -86,6 +93,47 @@ func (h *ResumeHandler) ResumePDF(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Content-Disposition", `inline; filename="tailored_resume.pdf"`)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+// savedBullet mirrors finalizations' stored bullet snapshot
+// ([{role_id,bullet_id,text,source}]).
+type savedBullet struct {
+	RoleID   string `json:"role_id"`
+	BulletID string `json:"bullet_id"`
+	Text     string `json:"text"`
+	Source   string `json:"source"`
+}
+
+func parseFinalBullets(raw []byte) []savedBullet {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []savedBullet
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// applyFinalBullets overlays the stored final text onto the canonical document
+// and returns the selection (role -> bullet ids) in stored order. A bullet
+// missing from canonical (e.g. since retired) is re-added with its stored text
+// so the generated resume still renders what the user saw.
+func applyFinalBullets(doc *resume.Document, final []savedBullet) map[string][]string {
+	roleIdx := make(map[string]int, len(doc.Experience))
+	for i := range doc.Experience {
+		roleIdx[doc.Experience[i].ID] = i
+	}
+	sel := map[string][]string{}
+	for _, fb := range final {
+		sel[fb.RoleID] = append(sel[fb.RoleID], fb.BulletID)
+		idx, ok := roleIdx[fb.RoleID]
+		if !ok {
+			continue
+		}
+		b := doc.Experience[idx].Bullets[fb.BulletID]
+		b.Text = fb.Text
+		doc.Experience[idx].Bullets[fb.BulletID] = b
+	}
+	return sel
 }
 
 // groupByRole turns ["role.bullet", …] into {role: [bullet, …]} preserving

@@ -19,9 +19,27 @@ type Finalization struct {
 	JobID         string          `json:"job_id"`
 	SysProfile    string          `json:"sys_profile"`
 	ResumeVersion string          `json:"resume_version"`
+	TemplateID    string          `json:"template_id"`
 	KeptBulletIDs []string        `json:"kept_bullet_ids"`
 	Removals      json.RawMessage `json:"removals"`
-	GeneratedAt   string          `json:"generated_at"`
+	// Bullets is the per-bullet final snapshot ([{role_id,bullet_id,text,
+	// source}]) — the rendered resume's actual text, including manual edits and
+	// accepted AI rewrites. The PDF renderer reads this rather than re-deriving
+	// from canonical.
+	Bullets     json.RawMessage `json:"bullets"`
+	GeneratedAt string          `json:"generated_at"`
+}
+
+// SaveInput is the per-job tailored-resume write. Removals and Bullets are
+// pre-marshalled jsonb bytes; nil/empty become empty arrays.
+type SaveInput struct {
+	JobID         string
+	SysProfile    string
+	ResumeVersion string
+	TemplateID    string
+	KeptBulletIDs []string
+	Removals      []byte
+	Bullets       []byte
 }
 
 type Repo struct {
@@ -31,46 +49,58 @@ type Repo struct {
 func New(q db.Querier) *Repo { return &Repo{q: q} }
 
 // Save upserts the per-job tailored resume and writes a resume_generated event
-// in the same operation. removals is the LLM removal diff as jsonb bytes (the
-// caller marshals it); nil is stored as an empty array.
-func (r *Repo) Save(ctx context.Context, jobID, sysProfile, resumeVersion string, keptIDs []string, removals []byte) (*Finalization, error) {
-	if jobID == "" || sysProfile == "" {
+// in the same operation.
+func (r *Repo) Save(ctx context.Context, in SaveInput) (*Finalization, error) {
+	if in.JobID == "" || in.SysProfile == "" {
 		return nil, errors.New("job_id and sys_profile required")
 	}
+	keptIDs := in.KeptBulletIDs
 	if keptIDs == nil {
 		keptIDs = []string{}
 	}
+	removals := in.Removals
 	if len(removals) == 0 {
 		removals = []byte("[]")
+	}
+	bullets := in.Bullets
+	if len(bullets) == 0 {
+		bullets = []byte("[]")
+	}
+	templateID := in.TemplateID
+	if templateID == "" {
+		templateID = "default"
 	}
 
 	var f Finalization
 	err := r.q.QueryRow(ctx, `
         INSERT INTO web.jobs_resume
-            (job_id, sys_profile, resume_version, kept_bullet_ids, removals, generated_at)
-        VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+            (job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, generated_at)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, NOW())
         ON CONFLICT (job_id, sys_profile) DO UPDATE
         SET resume_version  = EXCLUDED.resume_version,
+            template_id     = EXCLUDED.template_id,
             kept_bullet_ids = EXCLUDED.kept_bullet_ids,
             removals        = EXCLUDED.removals,
+            bullets         = EXCLUDED.bullets,
             generated_at    = NOW()
-        RETURNING job_id, sys_profile, resume_version, kept_bullet_ids, removals, generated_at::text
-    `, jobID, sysProfile, resumeVersion, keptIDs, string(removals)).Scan(
-		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.KeptBulletIDs, &f.Removals, &f.GeneratedAt,
+        RETURNING job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, generated_at::text
+    `, in.JobID, in.SysProfile, in.ResumeVersion, templateID, keptIDs, string(removals), string(bullets)).Scan(
+		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.TemplateID, &f.KeptBulletIDs, &f.Removals, &f.Bullets, &f.GeneratedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert jobs_resume: %w", err)
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"resume_version":  resumeVersion,
+		"resume_version":  in.ResumeVersion,
+		"template_id":     templateID,
 		"kept_bullet_ids": keptIDs,
 		"kept_count":      len(keptIDs),
 	})
 	if _, err := r.q.Exec(ctx, `
         INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
         VALUES ($1, $2, 'resume_generated', $3::jsonb)
-    `, sysProfile, jobID, string(payload)); err != nil {
+    `, in.SysProfile, in.JobID, string(payload)); err != nil {
 		return nil, fmt.Errorf("write event: %w", err)
 	}
 	return &f, nil
@@ -80,11 +110,11 @@ func (r *Repo) Save(ctx context.Context, jobID, sysProfile, resumeVersion string
 func (r *Repo) Get(ctx context.Context, jobID, sysProfile string) (*Finalization, error) {
 	var f Finalization
 	err := r.q.QueryRow(ctx, `
-        SELECT job_id, sys_profile, resume_version, kept_bullet_ids, removals, generated_at::text
+        SELECT job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, generated_at::text
         FROM web.jobs_resume
         WHERE job_id = $1 AND sys_profile = $2
     `, jobID, sysProfile).Scan(
-		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.KeptBulletIDs, &f.Removals, &f.GeneratedAt,
+		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.TemplateID, &f.KeptBulletIDs, &f.Removals, &f.Bullets, &f.GeneratedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

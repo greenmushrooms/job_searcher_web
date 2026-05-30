@@ -25,7 +25,8 @@ import (
 // retro the LLM's behaviour against the exact prompt that produced it.
 // Bump when the prompt template, system instruction, or output schema changes.
 // v2: removals-only schema (was per-bullet keep/drop decisions).
-const PromptVersion = "v2"
+// v3: adds per-bullet rewrites alongside removals.
+const PromptVersion = "v3"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%
@@ -50,6 +51,16 @@ type Removal struct {
 	Reason   string `json:"reason"`
 }
 
+// Rewrite is one bullet the LLM suggests rewording for this job. NewText is the
+// improved bullet; the original stays the source of truth until the user
+// accepts it. Bullets not listed keep their canonical text.
+type Rewrite struct {
+	RoleID   string `json:"role_id"`
+	BulletID string `json:"bullet_id"`
+	NewText  string `json:"new_text"`
+	Reason   string `json:"reason"`
+}
+
 // Usage mirrors the chat-completions response.usage object.
 type Usage struct {
 	PromptTokens     int     `json:"prompt_tokens"`
@@ -60,6 +71,7 @@ type Usage struct {
 
 type DraftResult struct {
 	Removals      []Removal `json:"removals"`
+	Rewrites      []Rewrite `json:"rewrites"`
 	Usage         Usage     `json:"usage"`
 	Model         string    `json:"model"`
 	PromptVersion string    `json:"prompt_version"`
@@ -127,10 +139,11 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 
 	var parsed struct {
 		Removals []Removal `json:"removals"`
+		Rewrites []Rewrite `json:"rewrites"`
 	}
 	content := resp.Choices[0].Message.Content
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
-		return nil, fmt.Errorf("decode removals JSON: %w (content=%s)", err, truncate(content, 500))
+		return nil, fmt.Errorf("decode draft JSON: %w (content=%s)", err, truncate(content, 500))
 	}
 
 	usage := Usage{
@@ -141,6 +154,7 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 	}
 	return &DraftResult{
 		Removals:      parsed.Removals,
+		Rewrites:      parsed.Rewrites,
 		Usage:         usage,
 		Model:         c.Model,
 		PromptVersion: PromptVersion,

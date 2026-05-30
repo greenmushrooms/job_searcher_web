@@ -14,9 +14,11 @@ import (
 // drop. This keeps the model's job conservative and its output small.
 const systemPrompt = `You help tailor a resume to a specific job posting.
 
-The bullets below are the candidate's full resume. Identify ONLY the bullets that should be REMOVED for this job — ones that add no signal for this specific role. Every bullet you do not list is kept by default. Be conservative: remove a bullet only when it is clearly off-topic or redundant for this job.
+The bullets below are the candidate's full resume. Do two things:
+1. REMOVALS — list bullets that should be removed for this job (clearly off-topic or redundant). Every bullet you do not list is kept by default. Be conservative.
+2. REWRITES — for bullets worth keeping that would land harder if reworded for THIS job, give an improved version. Keep the real achievement and any genuine metrics; never invent facts or numbers. Only rewrite when it clearly helps — most bullets need none.
 
-You return ONLY valid JSON in the exact schema specified by the user. No prose, no markdown, no commentary.`
+Do not both remove and rewrite the same bullet. You return ONLY valid JSON in the exact schema specified by the user. No prose, no markdown, no commentary.`
 
 // buildPrompt assembles the user message: job description, then the bullet
 // pool grouped by role for readability. The response schema is restated
@@ -60,18 +62,22 @@ func buildPrompt(jobDescription string, bullets []resume.Bullet) string {
 
 	b.WriteString(`
 === RESPONSE SCHEMA ===
-Return ONLY this JSON, listing ONLY the bullets to remove:
+Return ONLY this JSON:
 {
   "removals": [
     {"role_id": "<role>", "bullet_id": "<bullet>", "reason": "<one sentence>"}
+  ],
+  "rewrites": [
+    {"role_id": "<role>", "bullet_id": "<bullet>", "new_text": "<improved bullet>", "reason": "<one sentence>"}
   ]
 }
 
 Rules:
-- List ONLY bullets to remove. Every bullet you omit is kept.
-- "reason" must be one short sentence (under 25 words) on why the bullet is irrelevant or redundant for this job.
-- Remove only clearly off-topic or redundant bullets. When in doubt, keep it (omit it).
-- If nothing should be removed, return {"removals": []}.
+- removals: list ONLY bullets to remove. Every omitted bullet is kept. When in doubt, keep it.
+- rewrites: only bullets that read clearly better reworded for this job. Preserve the real achievement and any genuine metrics; invent nothing. Most bullets should be omitted (kept as-is).
+- Never both remove and rewrite the same bullet.
+- "reason" must be one short sentence (under 25 words).
+- If nothing applies, return empty arrays: {"removals": [], "rewrites": []}.
 `)
 	return b.String()
 }

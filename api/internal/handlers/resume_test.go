@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
@@ -102,5 +104,75 @@ func TestBuildDraftView(t *testing.T) {
 	}
 	if b2.Reason != "redundant" {
 		t.Errorf("r1.b2 reason: got %q, want %q", b2.Reason, "redundant")
+	}
+}
+
+func TestBuildDraftView_Rewrites(t *testing.T) {
+	res := &resume.Resume{
+		Bullets: []resume.Bullet{
+			{RoleID: "r1", BulletID: "b1", Text: "original one"},
+			{RoleID: "r1", BulletID: "b2", Text: "drop me"},
+		},
+	}
+	p := &draftedEventPayload{
+		Rewrites: []deepseek.Rewrite{
+			{RoleID: "r1", BulletID: "b1", NewText: "punchier one", Reason: "matches stack"},
+			// Rewrite on a removed bullet must be ignored.
+			{RoleID: "r1", BulletID: "b2", NewText: "won't show", Reason: "x"},
+		},
+		Removals: []deepseek.Removal{{RoleID: "r1", BulletID: "b2", Reason: "off-topic"}},
+	}
+
+	view := buildDraftView("job", "Slava", "now", p, res)
+
+	if view.RewriteCount != 1 {
+		t.Errorf("RewriteCount: got %d, want 1 (removed bullet's rewrite ignored)", view.RewriteCount)
+	}
+	b1 := view.Roles[0].Bullets[0]
+	if b1.NewText != "punchier one" || b1.RewriteReason != "matches stack" {
+		t.Errorf("b1 rewrite: got %q/%q", b1.NewText, b1.RewriteReason)
+	}
+	b2 := view.Roles[0].Bullets[1]
+	if b2.NewText != "" {
+		t.Errorf("b2 (removed) should carry no rewrite, got %q", b2.NewText)
+	}
+}
+
+func TestBuildFinalBullets(t *testing.T) {
+	res := &resume.Resume{
+		Bullets: []resume.Bullet{
+			{RoleID: "r1", BulletID: "b1", Text: "canonical one"},
+			{RoleID: "r1", BulletID: "b2", Text: "canonical two"},
+			{RoleID: "r2", BulletID: "b9", Text: "canonical nine"},
+		},
+	}
+	rewrites := map[string]string{"r1.b2": "ai two"}
+	form := url.Values{
+		"text_r1.b1": {"canonical one"}, // unchanged -> canonical
+		"text_r1.b2": {"ai two"},        // matches rewrite -> ai
+		"text_r2.b9": {"hand edited"},   // -> manual
+	}
+	r := &http.Request{Form: form}
+	kept := []string{"r1.b1", "r1.b2", "r2.b9", "bad-no-dot"}
+
+	got := buildFinalBullets(kept, r, res, rewrites)
+	if len(got) != 3 {
+		t.Fatalf("got %d bullets, want 3 (bad id skipped): %+v", len(got), got)
+	}
+	want := map[string]string{"r1.b1": "canonical", "r1.b2": "ai", "r2.b9": "manual"}
+	for _, fb := range got {
+		cid := fb.RoleID + "." + fb.BulletID
+		if want[cid] != fb.Source {
+			t.Errorf("%s: source got %q, want %q (text=%q)", cid, fb.Source, want[cid], fb.Text)
+		}
+	}
+}
+
+func TestBuildFinalBullets_EmptyFallsBackToCanonical(t *testing.T) {
+	res := &resume.Resume{Bullets: []resume.Bullet{{RoleID: "r1", BulletID: "b1", Text: "canonical one"}}}
+	r := &http.Request{Form: url.Values{"text_r1.b1": {"   "}}} // blank -> canonical fallback
+	got := buildFinalBullets([]string{"r1.b1"}, r, res, nil)
+	if len(got) != 1 || got[0].Text != "canonical one" || got[0].Source != "canonical" {
+		t.Errorf("blank should fall back to canonical, got %+v", got)
 	}
 }
