@@ -99,11 +99,11 @@ func (h *JobsHandler) Profiles(w http.ResponseWriter, r *http.Request) {
 func (h *JobsHandler) About(w http.ResponseWriter, r *http.Request) {
 	profiles, _ := h.Repo.Profiles(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":               "job_searcher_web",
-		"version":            "1",
-		"description":        "User-facing API on top of the job_searcher_2 pipeline. Reads public.* (pipeline), writes web.* (user state).",
-		"profiles":           profiles,
-		"default_min_score":  6.9,
+		"name":              "job_searcher_web",
+		"version":           "1",
+		"description":       "User-facing API on top of the job_searcher_2 pipeline. Reads public.* (pipeline), writes web.* (user state).",
+		"profiles":          profiles,
+		"default_min_score": 6.9,
 		"endpoints": []map[string]string{
 			{"method": "GET", "path": "/api/v1/about"},
 			{"method": "GET", "path": "/api/v1/profiles"},

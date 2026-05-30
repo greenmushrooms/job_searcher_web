@@ -35,8 +35,9 @@
     <span id="draft-spinner-{{ .JobID }}" class="htmx-indicator">working…</span>
   </header>
   <form class="draft-form"
-        hx-post="/api/v1/jobs/{{ .JobID }}/finalize-resume"
-        hx-ext="json-enc"
+        hx-post="/ui/jobs/{{ .JobID }}/generate"
+        hx-target="#generate-result-{{ .JobID }}"
+        hx-swap="innerHTML"
         hx-vals='{"profile":"{{ .Profile }}","resume_version":"{{ .ResumeVersion }}"}'>
     {{- range .Roles }}
     <fieldset class="draft-role" data-role-id="{{ .RoleID }}">
@@ -57,7 +58,8 @@
       {{- end }}
     </fieldset>
     {{- end }}
-    <button type="submit" class="draft-finalize">Finalize selection</button>
+    <button type="submit" class="draft-finalize">Generate</button>
   </form>
+  <div id="generate-result-{{ .JobID }}" class="generate-result"></div>
   {{- end }}
 </div>

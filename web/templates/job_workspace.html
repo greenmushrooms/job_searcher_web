@@ -1,0 +1,12 @@
+{{- /* Per-job right pane: summary (re-renders on apply/skip) on top, then the
+       tailoring draft lazy-loaded below. Loaded into #job-detail when a job row
+       is clicked. The draft container has a stable id distinct from the summary
+       so apply/skip swaps only the summary. */ -}}
+<div class="workspace" id="workspace-{{ .JobID }}">
+  {{ template "job_summary" .Summary }}
+  <div class="ws-draft"
+       hx-get="/ui/jobs/{{ .JobID }}/draft?profile={{ .Profile }}"
+       hx-trigger="load" hx-swap="innerHTML">
+    <div class="ws-loading">loading tailoring…</div>
+  </div>
+</div>

@@ -46,7 +46,7 @@ func openTestConn(t *testing.T) *pgx.Conn {
 }
 
 // TestUpsert_HappyPath posts a status change inside a tx, asserts the row is
-// in web.applications and an event is in web.application_events, then rolls
+// in web.job_review and an event is in web.application_events, then rolls
 // back so the DB is unchanged.
 func TestUpsert_HappyPath(t *testing.T) {
 	ctx := context.Background()
@@ -79,10 +79,10 @@ func TestUpsert_HappyPath(t *testing.T) {
 		t.Errorf("notes: got %v want %q", app.Notes, notes)
 	}
 
-	// Row landed in web.applications.
+	// Row landed in web.job_review.
 	var dbStatus string
 	if err := tx.QueryRow(ctx,
-		`SELECT status FROM web.applications WHERE job_id = $1 AND sys_profile = $2`,
+		`SELECT status FROM web.job_review WHERE job_id = $1 AND sys_profile = $2`,
 		jobID, "TestProfile",
 	).Scan(&dbStatus); err != nil {
 		t.Fatalf("read back: %v", err)
@@ -110,7 +110,7 @@ func TestUpsert_HappyPath(t *testing.T) {
 	}
 	var rowCount int
 	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM web.applications WHERE job_id = $1 AND sys_profile = $2`,
+		`SELECT count(*) FROM web.job_review WHERE job_id = $1 AND sys_profile = $2`,
 		jobID, "TestProfile",
 	).Scan(&rowCount); err != nil {
 		t.Fatalf("count rows: %v", err)

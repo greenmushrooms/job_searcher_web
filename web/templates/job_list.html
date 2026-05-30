@@ -1,0 +1,11 @@
+{{- /* Left-hand job list. Server-rendered so the first paint is populated and
+       so apply/skip OOB swaps have real row elements to target. */ -}}
+<div class="job-list" id="job-list">
+  {{- if not .Rows }}
+  <div class="jl-empty">No jobs match these filters.</div>
+  {{- else }}
+  {{- range .Rows }}
+  {{ template "job_row" . }}
+  {{- end }}
+  {{- end }}
+</div>

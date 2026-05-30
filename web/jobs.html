@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jobs — job_searcher_web</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+  body { font: 14px/1.45 system-ui, sans-serif; max-width: 1200px; margin: 1.25rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 .25rem; }
+  .sub { color: #666; font-size: 12px; margin-bottom: 1rem; }
+  button { padding: .3rem .6rem; background: #1a4ed8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #1340b5; }
+  button.small { padding: .2rem .5rem; font-size: 12px; }
+  button.secondary { background: #b00020; } button.secondary:hover { background: #8a0019; }
+  button.alt { background: #0a7d2e; } button.alt:hover { background: #086324; }
+
+  .layout { display: grid; grid-template-columns: 380px 1fr; gap: .9rem; align-items: start; }
+  @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
+
+  .job-list { border: 1px solid #e3e3e3; border-radius: 6px; max-height: 84vh; overflow-y: auto; background: #fff; }
+  .jl-empty { color: #999; padding: 1.5rem; text-align: center; }
+  .job-row { padding: .55rem .75rem; border-bottom: 1px solid #eee; cursor: pointer; }
+  .job-row:last-child { border-bottom: 0; }
+  .job-row:hover { background: #f7f7f8; }
+  /* "unread" = no apply/skip decision yet: bolder + accent bar, like an unread email */
+  .job-row.unread { background: #fbfdff; border-left: 3px solid #1a4ed8; padding-left: calc(.75rem - 3px); }
+  .job-row.unread .jr-title { font-weight: 700; }
+  .jr-top { display: flex; gap: .4rem; align-items: baseline; }
+  .jr-badge { width: 14px; flex: 0 0 14px; text-align: center; font-size: 13px; }
+  .jr-applied { color: #0a7d2e; } .jr-skipped { color: #b00020; }
+  .jr-interview { color: #b07d00; } .jr-unread { color: #1a4ed8; }
+  .jr-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .jr-score { color: #0a7d2e; font-weight: 600; font-size: 12px; }
+  .jr-meta { color: #666; font-size: 11px; margin-top: .15rem; padding-left: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .job-detail { border: 1px solid #e3e3e3; border-radius: 6px; padding: 1rem 1.25rem; background: #fff; min-height: 84vh; }
+  .detail-empty { color: #999; padding: 4rem 1rem; text-align: center; }
+  .js-row1 { display: flex; gap: 1rem; align-items: baseline; }
+  .job-summary h2 { margin: 0; font-size: 17px; flex: 1; }
+  .job-summary h2 a { color: #1a4ed8; text-decoration: none; }
+  .js-verdict { display: inline-block; padding: 1px 6px; border-radius: 3px; background: #eef; color: #339; font-size: 11px; text-transform: uppercase; vertical-align: middle; }
+  .js-score { color: #0a7d2e; font-weight: 700; font-size: 20px; }
+  .js-meta { color: #666; font-size: 12px; margin: .3rem 0 .7rem; }
+  .js-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .03em; margin: .5rem 0 .15rem; }
+  .js-text { font-size: 13px; line-height: 1.55; color: #333; }
+  .js-actions { display: flex; gap: .5rem; align-items: center; margin-top: 1.1rem; padding-top: .8rem; border-top: 1px solid #eee; }
+  .js-status { color: #555; font-size: 12px; margin-right: auto; }
+</style>
+</head>
+<body>
+  <h1>jobs</h1>
+  <div class="sub">Server-rendered list (slice 5). <b>Unread</b> = no apply/skip decision yet. Apply/Skip in the summary updates the row via an OOB swap.</div>
+  <div class="layout">
+    <div hx-get="/ui/jobs?profile=Slava" hx-trigger="load" hx-swap="innerHTML">
+      <div class="job-list"><div class="jl-empty">loading…</div></div>
+    </div>
+    <div id="job-detail" class="job-detail">
+      <div class="detail-empty">Pick a job on the left.</div>
+    </div>
+  </div>
+</body>
+</html>

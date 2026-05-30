@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -15,6 +14,7 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/finalizations"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
 )
@@ -22,6 +22,7 @@ import (
 type ResumeHandler struct {
 	Jobs          *jobs.Repo
 	Finalizations *finalizations.Repo
+	Resumes       *resume.Repo     // writes to the canonical resume (left editor)
 	DeepSeek      *deepseek.Client // may be nil if not configured
 	Pool          *pgxpool.Pool    // for writing resume_drafted event directly
 	Renderer      *render.Renderer // for /ui/* HTML fragments
@@ -32,12 +33,12 @@ type draftRequestBody struct {
 }
 
 type draftResponse struct {
-	Decisions     []deepseek.Decision `json:"decisions"`
-	Usage         deepseek.Usage      `json:"usage"`
-	Model         string              `json:"model"`
-	PromptVersion string              `json:"prompt_version"`
-	ResumeVersion string              `json:"resume_version"`
-	BulletCount   int                 `json:"bullet_count"`
+	Removals      []deepseek.Removal `json:"removals"`
+	Usage         deepseek.Usage     `json:"usage"`
+	Model         string             `json:"model"`
+	PromptVersion string             `json:"prompt_version"`
+	ResumeVersion string             `json:"resume_version"`
+	BulletCount   int                `json:"bullet_count"`
 }
 
 // Draft handles POST /api/v1/jobs/{id}/draft-resume.
@@ -49,7 +50,10 @@ func (h *ResumeHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	var body draftRequestBody
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if body.Profile == "" {
-		body.Profile = "Slava"
+		body.Profile = profiles.Default
+	} else if !profiles.Valid(r.Context(), body.Profile) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unknown profile", "valid": profiles.Known(r.Context())})
+		return
 	}
 
 	draft, res, eventErr, herr := h.draftAndPersist(r.Context(), jobID, body.Profile)
@@ -59,7 +63,7 @@ func (h *ResumeHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := draftResponse{
-		Decisions:     draft.Decisions,
+		Removals:      draft.Removals,
 		Usage:         draft.Usage,
 		Model:         draft.Model,
 		PromptVersion: draft.PromptVersion,
@@ -93,7 +97,10 @@ func (h *ResumeHandler) Finalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Profile == "" {
-		body.Profile = "Slava"
+		body.Profile = profiles.Default
+	} else if !profiles.Valid(r.Context(), body.Profile) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unknown profile", "valid": profiles.Known(r.Context())})
+		return
 	}
 	if body.KeptBulletIDs == nil {
 		writeErr(w, http.StatusBadRequest, "kept_bullet_ids required (use [] to keep nothing)")
@@ -102,7 +109,7 @@ func (h *ResumeHandler) Finalize(w http.ResponseWriter, r *http.Request) {
 
 	resumeVersion := body.ResumeVersion
 	if resumeVersion == "" {
-		res, err := resume.Load()
+		res, err := resume.Load(r.Context(), h.Pool)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "resume load: "+err.Error())
 			return
@@ -120,12 +127,25 @@ func (h *ResumeHandler) Finalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	saved, err := h.Finalizations.Save(r.Context(), jobID, body.Profile, resumeVersion, body.KeptBulletIDs)
+	removals := h.latestRemovalsJSON(r.Context(), jobID, body.Profile)
+	saved, err := h.Finalizations.Save(r.Context(), jobID, body.Profile, resumeVersion, body.KeptBulletIDs, removals)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, saved)
+}
+
+// latestRemovalsJSON snapshots the LLM removal diff from the most recent draft
+// event so a generated jobs_resume row self-describes its tailoring. Returns
+// nil (stored as []) when there's no draft to snapshot.
+func (h *ResumeHandler) latestRemovalsJSON(ctx context.Context, jobID, profile string) []byte {
+	payload, _, err := h.latestDraftEvent(ctx, jobID, profile)
+	if err != nil || payload == nil {
+		return nil
+	}
+	b, _ := json.Marshal(payload.effectiveRemovals())
+	return b
 }
 
 func (h *ResumeHandler) jobExists(ctx context.Context, jobID string) (bool, error) {
@@ -135,6 +155,66 @@ func (h *ResumeHandler) jobExists(ctx context.Context, jobID string) (bool, erro
 		jobID,
 	).Scan(&exists)
 	return exists, err
+}
+
+// generateResultView feeds web/templates/generate_result.html.
+type generateResultView struct {
+	JobID         string
+	Profile       string
+	KeptCount     int
+	ResumeVersion string
+	GeneratedAt   string
+}
+
+// GenerateResume handles POST /ui/jobs/{id}/generate — the right-hand "Generate"
+// button. The checkbox form posts the kept bullet IDs (standard form encoding,
+// repeated kept_bullet_ids); we snapshot the LLM removals, upsert jobs_resume,
+// and swap in a confirmation fragment. PDF rendering arrives in a later slice.
+func (h *ResumeHandler) GenerateResume(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
+	kept := r.Form["kept_bullet_ids"]
+	if kept == nil {
+		kept = []string{}
+	}
+
+	resumeVersion := r.FormValue("resume_version")
+	if resumeVersion == "" {
+		res, err := resume.LoadProfile(r.Context(), h.Pool, profile)
+		if err != nil {
+			http.Error(w, "resume load: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resumeVersion = res.Version
+	}
+
+	exists, err := h.jobExists(r.Context(), jobID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !exists {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	removals := h.latestRemovalsJSON(r.Context(), jobID, profile)
+	saved, err := h.Finalizations.Save(r.Context(), jobID, profile, resumeVersion, kept, removals)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.Renderer.HTML(w, http.StatusOK, "generate_result", generateResultView{
+		JobID:         jobID,
+		Profile:       profile,
+		KeptCount:     len(saved.KeptBulletIDs),
+		ResumeVersion: saved.ResumeVersion,
+		GeneratedAt:   saved.GeneratedAt,
+	})
 }
 
 // ── HTML fragment routes ────────────────────────────────────────────────────
@@ -174,10 +254,7 @@ type draftBulletView struct {
 // fragment with a "draft now" button if no event exists yet.
 func (h *ResumeHandler) DraftFragment(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
-	profile := r.URL.Query().Get("profile")
-	if profile == "" {
-		profile = "Slava"
-	}
+	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
 
 	payload, draftedAt, err := h.latestDraftEvent(r.Context(), jobID, profile)
 	if err != nil {
@@ -193,7 +270,7 @@ func (h *ResumeHandler) DraftFragment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := resume.Load()
+	res, err := resume.Load(r.Context(), h.Pool)
 	if err != nil {
 		http.Error(w, "resume load: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -207,10 +284,7 @@ func (h *ResumeHandler) DraftFragment(w http.ResponseWriter, r *http.Request) {
 // Powers the "draft now" button in the empty-state fragment.
 func (h *ResumeHandler) DraftFragmentTrigger(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
-	profile := r.FormValue("profile")
-	if profile == "" {
-		profile = "Slava"
-	}
+	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 
 	draft, res, _, herr := h.draftAndPersist(r.Context(), jobID, profile)
 	if herr != nil {
@@ -229,12 +303,39 @@ func (h *ResumeHandler) DraftFragmentTrigger(w http.ResponseWriter, r *http.Requ
 // for resume_drafted, mirrored here so both the writer and the fragment reader
 // agree on field names.
 type draftedEventPayload struct {
-	PromptVersion string               `json:"prompt_version"`
-	Model         string               `json:"model"`
-	ResumeVersion string               `json:"resume_version"`
-	CostUSD       float64              `json:"cost_usd"`
-	BulletCount   int                  `json:"bullet_count"`
-	Decisions     []deepseek.Decision  `json:"decisions"`
+	PromptVersion string             `json:"prompt_version"`
+	Model         string             `json:"model"`
+	ResumeVersion string             `json:"resume_version"`
+	CostUSD       float64            `json:"cost_usd"`
+	BulletCount   int                `json:"bullet_count"`
+	Removals      []deepseek.Removal `json:"removals"`
+	// LegacyDecisions reads pre-v2 events that stored per-bullet keep/drop
+	// decisions instead of removals. effectiveRemovals() folds them in.
+	LegacyDecisions []legacyDecision `json:"decisions,omitempty"`
+}
+
+// legacyDecision is the old (pre-v2) per-bullet payload shape. Kept only so
+// drafts created before the removals-only reframe still render.
+type legacyDecision struct {
+	RoleID   string `json:"role_id"`
+	BulletID string `json:"bullet_id"`
+	Keep     bool   `json:"keep"`
+	Reason   string `json:"reason"`
+}
+
+// effectiveRemovals returns the removal set, converting a legacy decisions
+// payload (dropped = keep:false) when the event predates the v2 schema.
+func (p *draftedEventPayload) effectiveRemovals() []deepseek.Removal {
+	if len(p.Removals) > 0 || len(p.LegacyDecisions) == 0 {
+		return p.Removals
+	}
+	var out []deepseek.Removal
+	for _, d := range p.LegacyDecisions {
+		if !d.Keep {
+			out = append(out, deepseek.Removal{RoleID: d.RoleID, BulletID: d.BulletID, Reason: d.Reason})
+		}
+	}
+	return out
 }
 
 type handlerErr struct {
@@ -262,7 +363,7 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile stri
 		return nil, nil, nil, &handlerErr{http.StatusBadRequest, "job has no description to tailor against"}
 	}
 
-	res, err := resume.Load()
+	res, err := resume.Load(ctx, h.Pool)
 	if err != nil {
 		return nil, nil, nil, &handlerErr{http.StatusInternalServerError, "resume load: " + err.Error()}
 	}
@@ -281,7 +382,7 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile stri
 		"total_tokens":      draft.Usage.TotalTokens,
 		"cost_usd":          draft.Usage.CostUSD,
 		"bullet_count":      len(res.Bullets),
-		"decisions":         draft.Decisions,
+		"removals":          draft.Removals,
 	})
 	_, eventErr := h.Pool.Exec(ctx, `
         INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
@@ -326,15 +427,21 @@ func draftEventPayload(draft *deepseek.DraftResult, res *resume.Resume) *drafted
 		ResumeVersion: res.Version,
 		CostUSD:       draft.Usage.CostUSD,
 		BulletCount:   len(res.Bullets),
-		Decisions:     draft.Decisions,
+		Removals:      draft.Removals,
 	}
 }
 
-// buildDraftView joins decisions with bullet metadata so the template only
-// has to iterate. Decisions whose bullet IDs no longer exist in the current
-// resume are skipped — happens when resume_htmx removed/renamed a bullet
-// after the draft was created.
+// buildDraftView renders the full current resume and overlays the draft's
+// removals as a diff: every bullet is kept (checked) unless the LLM flagged it
+// for removal, in which case it's unchecked and shows the reason. Removals that
+// point at bullets no longer in the resume are simply ignored — the resume is
+// the source of truth, the removals are just a thin overlay.
 func buildDraftView(jobID, profile, draftedAt string, p *draftedEventPayload, res *resume.Resume) draftFragmentView {
+	removed := make(map[string]string) // composite ID -> removal reason
+	for _, rm := range p.effectiveRemovals() {
+		removed[rm.RoleID+"."+rm.BulletID] = rm.Reason
+	}
+
 	view := draftFragmentView{
 		JobID:         jobID,
 		Profile:       profile,
@@ -342,25 +449,11 @@ func buildDraftView(jobID, profile, draftedAt string, p *draftedEventPayload, re
 		ResumeVersion: p.ResumeVersion,
 		DraftedAt:     draftedAt,
 		CostUSD:       p.CostUSD,
-		TotalCount:    len(p.Decisions),
-	}
-
-	// Index decisions by composite ID so we can render in resume order (which
-	// is what the user is used to seeing in the resume_htmx UI), not LLM order.
-	byID := make(map[string]deepseek.Decision, len(p.Decisions))
-	for _, d := range p.Decisions {
-		byID[d.RoleID+"."+d.BulletID] = d
-		if d.Keep {
-			view.KeptCount++
-		}
+		TotalCount:    len(res.Bullets),
 	}
 
 	roleIdx := map[string]int{}
 	for _, b := range res.Bullets {
-		d, ok := byID[b.CompositeID()]
-		if !ok {
-			continue
-		}
 		idx, seen := roleIdx[b.RoleID]
 		if !seen {
 			view.Roles = append(view.Roles, draftRoleView{
@@ -372,45 +465,16 @@ func buildDraftView(jobID, profile, draftedAt string, p *draftedEventPayload, re
 			idx = len(view.Roles) - 1
 			roleIdx[b.RoleID] = idx
 		}
+		reason, isRemoved := removed[b.CompositeID()]
+		if !isRemoved {
+			view.KeptCount++
+		}
 		view.Roles[idx].Bullets = append(view.Roles[idx].Bullets, draftBulletView{
 			CompositeID: b.CompositeID(),
 			Text:        b.Text,
-			Keep:        d.Keep,
-			Reason:      d.Reason,
+			Keep:        !isRemoved,
+			Reason:      reason,
 		})
-	}
-
-	// Stable role order is preserved by resume iteration, but if a decision
-	// references a role that no longer exists in resume_data.json (whole role
-	// retired), surface those bullets in a synthetic "removed roles" group at
-	// the end rather than dropping them silently.
-	missingByRole := map[string][]draftBulletView{}
-	for _, d := range p.Decisions {
-		cid := d.RoleID + "." + d.BulletID
-		if res.Lookup(cid) != nil {
-			continue
-		}
-		missingByRole[d.RoleID] = append(missingByRole[d.RoleID], draftBulletView{
-			CompositeID: cid,
-			Text:        "(bullet removed from resume_data.json)",
-			Keep:        d.Keep,
-			Reason:      d.Reason,
-		})
-	}
-	if len(missingByRole) > 0 {
-		// Deterministic ordering for the "missing" section.
-		keys := make([]string, 0, len(missingByRole))
-		for k := range missingByRole {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			view.Roles = append(view.Roles, draftRoleView{
-				RoleID:    k,
-				RoleTitle: "(retired role: " + k + ")",
-				Bullets:   missingByRole[k],
-			})
-		}
 	}
 
 	return view

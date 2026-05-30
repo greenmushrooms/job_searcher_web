@@ -1,0 +1,29 @@
+{{- /* Left-hand canonical resume editor. Permanent edits: each bullet is its
+       own inline-edit form; the add-form appends a new bullet row to the role's
+       list. No JS — every action is an htmx fragment swap. */ -}}
+<div class="resume-editor" id="resume-editor">
+  <header class="re-header">
+    <h2>Resume — {{ .Profile }}</h2>
+    <span class="re-sub">Permanent edits to your canonical resume.</span>
+  </header>
+  {{- range .Roles }}
+  <section class="re-role" data-role-id="{{ .RoleID }}">
+    <h3>{{ .Title }}
+      {{- if .Company }} <span class="re-company">— {{ .Company }}</span>{{ end }}
+      {{- if .Dates }} <span class="re-dates">{{ .Dates }}</span>{{ end }}
+    </h3>
+    <div class="re-bullets" id="bullets-{{ .RoleID }}">
+      {{- range .Bullets }}
+      {{ template "resume_bullet" . }}
+      {{- end }}
+    </div>
+    <form class="re-add"
+          hx-post="/ui/resume/bullets/{{ .RoleID }}"
+          hx-target="#bullets-{{ .RoleID }}" hx-swap="beforeend"
+          hx-vals='{"profile":"{{ $.Profile }}"}'>
+      <textarea name="text" rows="2" placeholder="Add a new bullet to this role…"></textarea>
+      <button type="submit" class="small">Add bullet</button>
+    </form>
+  </section>
+  {{- end }}
+</div>

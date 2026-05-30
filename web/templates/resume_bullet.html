@@ -1,0 +1,20 @@
+{{- /* One editable canonical-resume bullet. Standalone-swappable: Save
+       re-renders it in place (outerHTML), Remove swaps in an empty body so the
+       row vanishes. The row carries its own profile in hx-vals so it posts
+       without depending on a parent form. */ -}}
+<form class="re-bullet" id="bullet-{{ .RoleID }}-{{ .BulletID }}"
+      hx-post="/ui/resume/bullets/{{ .RoleID }}/{{ .BulletID }}"
+      hx-target="this" hx-swap="outerHTML"
+      hx-vals='{"profile":"{{ .Profile }}"}'>
+  <textarea name="text" rows="2" class="re-text">{{ .Text }}</textarea>
+  <div class="re-actions">
+    <button type="submit" class="small">Save</button>
+    <button type="button" class="small secondary"
+            hx-post="/ui/resume/bullets/{{ .RoleID }}/{{ .BulletID }}/retire"
+            hx-vals='{"profile":"{{ .Profile }}"}'
+            hx-target="#bullet-{{ .RoleID }}-{{ .BulletID }}"
+            hx-swap="outerHTML"
+            hx-confirm="Remove this bullet from your resume?">Remove</button>
+    <span class="re-id">{{ .BulletID }}</span>
+  </div>
+</form>

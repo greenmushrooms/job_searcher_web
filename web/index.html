@@ -5,31 +5,86 @@
 <title>job_searcher_web</title>
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <style>
-  body { font: 14px/1.4 system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
-  h1 { margin: 0 0 .25rem; }
-  .sub { color: #666; margin-bottom: 1.25rem; }
-  form { display: flex; gap: .5rem; align-items: center; margin-bottom: 1rem; }
-  label { color: #555; font-size: 12px; }
-  input, select { padding: .35rem .5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
-  .job { border: 1px solid #e3e3e3; border-radius: 6px; padding: .75rem 1rem; margin-bottom: .5rem; }
-  .job .row1 { display: flex; justify-content: space-between; gap: 1rem; }
-  .job h3 { margin: 0; font-size: 15px; }
-  .job h3 a { color: #1a4ed8; text-decoration: none; }
-  .job .meta { color: #666; font-size: 12px; margin-top: .25rem; }
-  .score { font-weight: 600; color: #0a7d2e; white-space: nowrap; }
-  .status { font-size: 11px; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; background: #eef; color: #339; margin-left: .5rem; }
+  body { font: 14px/1.45 system-ui, sans-serif; max-width: 1400px; margin: 1.25rem auto; padding: 0 1rem; color: #222; }
+  h1 { margin: 0 0 .25rem; font-size: 20px; }
+  .sub { color: #666; margin-bottom: 1rem; font-size: 12px; }
+
+  .filters { display: flex; gap: .6rem; flex-wrap: wrap; align-items: end; margin-bottom: .9rem; padding: .6rem .8rem; background: #f7f7f8; border-radius: 6px; }
+  .filters label { display: flex; flex-direction: column; gap: .15rem; font-size: 11px; color: #555; }
+  input, select { padding: .3rem .45rem; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; font-family: inherit; }
+
+  .layout { display: grid; grid-template-columns: 380px 1fr; gap: .9rem; align-items: start; }
+  @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
+
+  /* Email-style list */
+  .joblist { border: 1px solid #e3e3e3; border-radius: 6px; max-height: 82vh; overflow-y: auto; background: white; }
+  .row { padding: .55rem .75rem; border-bottom: 1px solid #eee; cursor: pointer; }
+  .row:last-child { border-bottom: 0; }
+  .row:hover { background: #f7f7f8; }
+  .row.active { background: #eaf0ff; border-left: 3px solid #1a4ed8; padding-left: calc(.75rem - 3px); }
+  .row .top { display: flex; gap: .4rem; align-items: baseline; }
+  .row .verdict { font-size: 13px; line-height: 1; width: 14px; flex: 0 0 14px; text-align: center; }
+  .row .verdict.up { color: #0a7d2e; }
+  .row .verdict.down { color: #b00020; }
+  .row .verdict.flat { color: #888; }
+  .row .title { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .score { color: #0a7d2e; font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .row .meta { color: #666; font-size: 11px; margin-top: .15rem; padding-left: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .third { color: #555; font-size: 11px; margin-top: .15rem; padding-left: 18px; display: flex; gap: .5rem; align-items: center; }
+  .row .salary { color: #1a4ed8; font-weight: 500; }
+  .row .status { font-size: 10px; text-transform: uppercase; padding: 1px 5px; border-radius: 3px; background: #eef; color: #339; }
+  .row .status.applied { background: #e7f5ec; color: #0a7d2e; }
+  .row .status.skipped { background: #f4f4f4; color: #777; }
+
+  /* Detail pane */
+  .detail { border: 1px solid #e3e3e3; border-radius: 6px; padding: 1rem 1.25rem; background: white; min-height: 82vh; }
+  .detail .empty { color: #999; padding: 4rem 1rem; text-align: center; }
+  .detail h2 { margin: 0 0 .25rem; font-size: 17px; }
+  .detail h2 a { color: #1a4ed8; text-decoration: none; }
+  .detail h2 a:hover { text-decoration: underline; }
+  .detail .badges { display: flex; gap: .4rem; align-items: center; margin-bottom: .35rem; flex-wrap: wrap; }
+  .detail .badge { padding: 2px 7px; border-radius: 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  .detail .badge.up { background: #e7f5ec; color: #0a7d2e; }
+  .detail .badge.down { background: #fde7e7; color: #b00020; }
+  .detail .badge.flat { background: #eef; color: #339; }
+  .detail .badge.score { background: #0a7d2e; color: white; font-weight: 600; }
+  .detail .meta { color: #666; font-size: 12px; margin-bottom: .9rem; }
+  .detail .reasoning { background: #fafafa; border-left: 3px solid #1a4ed8; padding: .6rem .9rem; margin: .6rem 0 1rem; border-radius: 0 4px 4px 0; }
+  .detail .reasoning dl { display: grid; grid-template-columns: 110px 1fr; gap: .35rem .8rem; margin: 0; }
+  .detail .reasoning dt { font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: .03em; margin-top: 2px; }
+  .detail .reasoning dd { margin: 0; font-size: 13px; line-height: 1.5; }
+  .detail .application { padding: .5rem .8rem; background: #e7f5ec; border-radius: 4px; margin-bottom: .9rem; font-size: 12px; color: #0a5c22; }
+  .detail .application b { text-transform: uppercase; font-size: 11px; }
+  .detail .actions { display: flex; gap: .5rem; margin: .7rem 0; align-items: center; flex-wrap: wrap; }
+  .detail .actions button { padding: .4rem .8rem; border: 0; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit; font-weight: 500; }
+  .detail .actions button:disabled { opacity: .5; cursor: wait; }
+  .btn-apply { background: #0a7d2e; color: white; }
+  .btn-apply:hover:not(:disabled) { background: #086324; }
+  .btn-pass { background: #888; color: white; }
+  .btn-pass:hover:not(:disabled) { background: #666; }
+  .btn-draft { background: #1a4ed8; color: white; }
+  .btn-draft:hover:not(:disabled) { background: #1340b5; }
+  .action-status { font-size: 12px; color: #555; margin-left: .35rem; }
+  .action-status.err { color: #b00020; }
+  .action-status.ok { color: #0a7d2e; }
+  .action-status a { color: #1a4ed8; }
+  .detail details { margin-top: .9rem; }
+  .detail summary { cursor: pointer; font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: .03em; padding: .3rem 0; }
+  .detail .desc { white-space: pre-wrap; font-size: 13px; line-height: 1.55; color: #333; max-height: 50vh; overflow-y: auto; padding: .5rem .75rem; background: #fafafa; border-radius: 4px; }
+
   .empty { color: #999; padding: 2rem; text-align: center; }
+  .api-error { padding: .8rem 1rem; background: #fff5f5; border: 1px solid #f5c2c2; border-radius: 4px; color: #8a1a1a; font-size: 12px; }
 </style>
 </head>
 <body>
   <h1>job_searcher_web</h1>
-  <div class="sub">Good jobs from the pipeline, latest first.</div>
+  <div class="sub">Good jobs from the pipeline. Click a row to see its eval.</div>
 
-  <form hx-get="/api/v1/jobs"
+  <form class="filters"
+        hx-get="/api/v1/jobs"
         hx-trigger="load, change, submit"
-        hx-target="#jobs"
+        hx-target="#joblist"
         hx-swap="innerHTML"
-        hx-ext=""
         onsubmit="event.preventDefault()">
     <label>profile
       <select name="profile">
@@ -43,50 +98,306 @@
       <input type="number" name="min_score" value="6.9" step="0.1" min="0" max="10" style="width:64px">
     </label>
     <label>limit
-      <input type="number" name="limit" value="50" min="1" max="200" style="width:64px">
+      <input type="number" name="limit" value="100" min="1" max="500" style="width:64px">
+    </label>
+    <label>range
+      <select name="_range">
+        <option value="1">last week</option>
+        <option value="4" selected>last 4 weeks</option>
+        <option value="12">last 12 weeks</option>
+        <option value="0">all time</option>
+      </select>
     </label>
   </form>
 
-  <div id="jobs" class="empty">loading…</div>
+  <div class="layout">
+    <div id="joblist" class="joblist">
+      <div class="empty">loading…</div>
+    </div>
+    <div id="detail" class="detail">
+      <div class="empty">Select a job on the left.</div>
+    </div>
+  </div>
 
 <script>
-  // Render the JSON response from /api/v1/jobs into the #jobs div.
-  document.body.addEventListener('htmx:beforeSwap', (e) => {
-    if (e.detail.target.id !== 'jobs') return;
-    e.detail.shouldSwap = true;
-    try {
-      const data = JSON.parse(e.detail.serverResponse);
-      e.detail.serverResponse = renderJobs(data);
-    } catch {
-      e.detail.serverResponse = '<div class="empty">bad response</div>';
+  // Cache the most recent jobs payload so row clicks can render detail without
+  // another API round-trip. Wiped on every list re-fetch.
+  let jobsById = {};
+
+  // Translate the relative "range" select into an absolute `from=YYYY-MM-DD`
+  // filtered against date_posted (when the job went up, not when scored).
+  document.body.addEventListener('htmx:configRequest', (e) => {
+    const p = e.detail.parameters;
+    if (!p || !('_range' in p)) return;
+    const weeks = parseInt(p._range, 10);
+    delete p._range;
+    if (weeks > 0) {
+      const d = new Date();
+      d.setDate(d.getDate() - weeks * 7);
+      p.from = d.toISOString().slice(0, 10);
+      p.date_field = 'posted';
     }
   });
 
-  function renderJobs(data) {
-    const jobs = data.jobs || [];
-    if (!jobs.length) return '<div class="empty">no jobs match.</div>';
+  // Intercept the JSON response and render list rows; cache jobs by id.
+  document.body.addEventListener('htmx:beforeSwap', (e) => {
+    if (e.detail.target.id !== 'joblist') return;
+    e.detail.shouldSwap = true;
+    try {
+      const data = JSON.parse(e.detail.serverResponse);
+      if (data.error) {
+        e.detail.serverResponse = `<div class="api-error">${esc(data.error)}</div>`;
+        jobsById = {};
+        return;
+      }
+      const jobs = data.jobs || [];
+      jobsById = Object.fromEntries(jobs.map(j => [j.id, j]));
+      e.detail.serverResponse = renderList(jobs);
+    } catch (err) {
+      e.detail.serverResponse = `<div class="api-error">bad response: ${esc(String(err))}</div>`;
+      jobsById = {};
+    }
+  });
+
+  // After swap, attach click handlers and clear the detail pane.
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    if (e.detail.target.id !== 'joblist') return;
+    document.querySelectorAll('#joblist .row').forEach(row => {
+      row.addEventListener('click', () => selectRow(row.dataset.jobId));
+    });
+    document.getElementById('detail').innerHTML =
+      '<div class="empty">Select a job on the left.</div>';
+  });
+
+  function verdictGlyph(v) {
+    const k = (v || '').toLowerCase();
+    if (k.includes('up')) return { cls: 'up', glyph: '↑' };
+    if (k.includes('down') || k.includes('regress')) return { cls: 'down', glyph: '↓' };
+    if (k.includes('lateral') || k.includes('flat')) return { cls: 'flat', glyph: '→' };
+    return { cls: 'flat', glyph: '·' };
+  }
+
+  function formatSalary(c) {
+    if (!c) return '';
+    const min = c.min, max = c.max;
+    const cur = c.currency || '';
+    const iv = c.interval || '';
+    if (min && max) return `${shortNum(min)}–${shortNum(max)} ${cur} ${iv}`.trim();
+    if (min) return `${shortNum(min)}+ ${cur} ${iv}`.trim();
+    if (max) return `up to ${shortNum(max)} ${cur} ${iv}`.trim();
+    return '';
+  }
+
+  function shortNum(n) {
+    if (n >= 1000) return Math.round(n / 1000) + 'k';
+    return String(n);
+  }
+
+  function renderList(jobs) {
+    if (!jobs.length) return '<div class="empty">no jobs match these filters.</div>';
     return jobs.map(j => {
-      const comp = j.compensation
-        ? `${j.compensation.min}–${j.compensation.max} ${j.compensation.currency || ''} ${j.compensation.interval || ''}`
-        : '';
-      const status = j.application ? `<span class="status">${j.application.status}</span>` : '';
+      const v = verdictGlyph(j.reasoning?.verdict);
+      const salary = formatSalary(j.compensation);
+      const app = j.application?.status
+        ? `<span class="status ${esc(j.application.status)}">${esc(j.application.status)}</span>` : '';
       return `
-        <div class="job">
-          <div class="row1">
-            <h3><a href="${j.url || '#'}" target="_blank" rel="noopener">${esc(j.title || '(no title)')}</a>${status}</h3>
-            <div class="score">${j.score?.toFixed(1) ?? '—'}</div>
+        <div class="row" data-job-id="${esc(j.id)}">
+          <div class="top">
+            <span class="verdict ${v.cls}" title="${esc(j.reasoning?.verdict || '')}">${v.glyph}</span>
+            <span class="title">${esc(j.title || '(no title)')}</span>
+            <span class="score">${j.score?.toFixed(1) ?? '—'}</span>
           </div>
           <div class="meta">
-            ${esc(j.company || '')} · ${esc(j.location || '')}${j.is_remote ? ' · remote' : ''}
-            · posted ${j.date_posted || '?'} · evaluated ${j.eval_date?.slice(0,10) || '?'}
-            ${comp ? ' · ' + esc(comp) : ''}
+            ${esc(j.company || '')} · ${esc(j.location || '—')}${j.is_remote ? ' · remote' : ''}
+            · posted ${j.date_posted || '?'}
           </div>
+          ${(salary || app) ? `<div class="third">${salary ? `<span class="salary">${esc(salary)}</span>` : ''}${app}</div>` : ''}
         </div>`;
     }).join('');
   }
 
+  function selectRow(id) {
+    document.querySelectorAll('#joblist .row').forEach(r => {
+      r.classList.toggle('active', r.dataset.jobId === id);
+    });
+    renderDetail(jobsById[id]);
+  }
+
+  function currentProfile() {
+    return document.querySelector('select[name="profile"]')?.value || 'Slava';
+  }
+
+  // Delegate clicks for Apply / Pass / Generate resume buttons in the detail pane.
+  document.getElementById('detail').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const id = btn.dataset.jobId;
+    const action = btn.dataset.action;
+    if (action === 'apply')      await setStatus(id, 'applied', btn);
+    else if (action === 'pass')  await setStatus(id, 'skipped', btn);
+    else if (action === 'draft') await generateDraft(id, btn);
+  });
+
+  async function setStatus(id, status, btn) {
+    const status$ = document.getElementById('action-status');
+    setBusy(true);
+    status$.className = 'action-status'; status$.textContent = `marking ${status}…`;
+    try {
+      const r = await fetch(`/api/v1/jobs/${encodeURIComponent(id)}/status`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ profile: currentProfile(), status }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        status$.className = 'action-status err';
+        status$.textContent = `${status} failed: ${data?.error || r.status}`;
+        setBusy(false);
+        return;
+      }
+      // Update the cached job + row in place, no full refetch.
+      const j = jobsById[id];
+      if (j) {
+        j.application = { status: data.status, notes: data.notes, updated_at: data.updated_at };
+      }
+      status$.className = 'action-status ok';
+      status$.textContent = `marked ${status}`;
+      refreshRow(id);
+      renderDetail(j);
+    } catch (err) {
+      status$.className = 'action-status err';
+      status$.textContent = `network error: ${err}`;
+      setBusy(false);
+    }
+  }
+
+  async function generateDraft(id, btn) {
+    const status$ = document.getElementById('action-status');
+    setBusy(true);
+    status$.className = 'action-status';
+    status$.textContent = 'drafting via DeepSeek (~60s)…';
+    try {
+      const r = await fetch(`/api/v1/jobs/${encodeURIComponent(id)}/draft-resume`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ profile: currentProfile() }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        status$.className = 'action-status err';
+        status$.textContent = `draft failed: ${data?.error || r.status}`;
+        setBusy(false);
+        return;
+      }
+      const d = data.draft || data;
+      const kept = (d.decisions || []).filter(x => x.keep).length;
+      const total = d.bullet_count ?? (d.decisions || []).length;
+      const cost = d.usage?.cost_usd != null ? `$${d.usage.cost_usd.toFixed(4)}` : '';
+      status$.className = 'action-status ok';
+      status$.innerHTML = `drafted: kept ${kept}/${total} ${cost ? `· ${cost}` : ''} · `
+        + `<a href="/draft.html" target="_blank">open in draft harness</a>`;
+      setBusy(false);
+    } catch (err) {
+      status$.className = 'action-status err';
+      status$.textContent = `network error: ${err}`;
+      setBusy(false);
+    }
+  }
+
+  function setBusy(busy) {
+    document.querySelectorAll('#detail .actions button').forEach(b => b.disabled = busy);
+  }
+
+  // Update one row's status badge in the left list without re-fetching.
+  function refreshRow(id) {
+    const row = document.querySelector(`#joblist .row[data-job-id="${CSS.escape(id)}"]`);
+    if (!row) return;
+    const j = jobsById[id];
+    if (!j) return;
+    let third = row.querySelector('.third');
+    const salary = formatSalary(j.compensation);
+    const appHTML = j.application?.status
+      ? `<span class="status ${esc(j.application.status)}">${esc(j.application.status)}</span>` : '';
+    const innerHTML = `${salary ? `<span class="salary">${esc(salary)}</span>` : ''}${appHTML}`;
+    if (third) third.innerHTML = innerHTML;
+    else if (innerHTML) {
+      const div = document.createElement('div');
+      div.className = 'third';
+      div.innerHTML = innerHTML;
+      row.appendChild(div);
+    }
+  }
+
+  function renderDetail(j) {
+    const pane = document.getElementById('detail');
+    if (!j) { pane.innerHTML = '<div class="empty">Job not found.</div>'; return; }
+    const v = verdictGlyph(j.reasoning?.verdict);
+    const salary = formatSalary(j.compensation);
+    const r = j.reasoning || {};
+    const reasoningRows = [
+      ['Summary',     r.summary],
+      ['Why you fit', r.why_you_fit],
+      ['Key gap',     r.key_gap],
+      ['Tech stack',  r.tech_stack],
+      ['Comparisons', r.comparisons],
+    ].filter(([_, val]) => val && !(Array.isArray(val) && !val.length))
+     .map(([k, val]) => [k, renderReasoningValue(val)]);
+
+    pane.innerHTML = `
+      <h2><a href="${esc(j.url || '#')}" target="_blank" rel="noopener">${esc(j.title || '(no title)')}</a></h2>
+      <div class="badges">
+        <span class="badge score">${j.score?.toFixed(1) ?? '—'}</span>
+        ${r.verdict ? `<span class="badge ${v.cls}">${v.glyph} ${esc(r.verdict)}</span>` : ''}
+        ${salary ? `<span class="badge flat">${esc(salary)}</span>` : ''}
+      </div>
+      <div class="meta">
+        ${esc(j.company || '')} · ${esc(j.location || '—')}${j.is_remote ? ' · remote' : ''}
+        · posted ${j.date_posted || '?'} · evaluated ${j.eval_date?.slice(0, 10) || '?'}
+        ${j.country ? ` · ${esc(j.country)}` : ''}
+      </div>
+      ${j.application ? `
+        <div class="application">
+          <b>${esc(j.application.status)}</b>
+          ${j.application.updated_at ? ` · ${esc(j.application.updated_at.slice(0,10))}` : ''}
+          ${j.application.notes ? `<div style="margin-top:.25rem">${esc(j.application.notes)}</div>` : ''}
+        </div>` : ''}
+      <div class="actions">
+        <button class="btn-apply" data-action="apply" data-job-id="${esc(j.id)}">Apply</button>
+        <button class="btn-pass"  data-action="pass"  data-job-id="${esc(j.id)}">Pass</button>
+        <button class="btn-draft" data-action="draft" data-job-id="${esc(j.id)}">Generate resume</button>
+        <span class="action-status" id="action-status"></span>
+      </div>
+      ${reasoningRows.length ? `
+        <div class="reasoning">
+          <dl>
+            ${reasoningRows.map(([k, val]) => `<dt>${k}</dt><dd>${val}</dd>`).join('')}
+          </dl>
+        </div>` : ''}
+      <details>
+        <summary>Job description</summary>
+        <div class="desc">${esc(j.description || '(no description)')}</div>
+      </details>`;
+  }
+
+  // Reasoning fields are sometimes strings, sometimes arrays, sometimes
+  // shaped like {matches:[...], gaps:[...]}. Render a readable HTML chunk
+  // for each; returns escaped HTML (callers must NOT esc() again).
+  function renderReasoningValue(v) {
+    if (v == null) return '';
+    if (typeof v === 'string') return esc(v);
+    if (typeof v === 'number' || typeof v === 'boolean') return esc(String(v));
+    if (Array.isArray(v)) return v.map(renderReasoningValue).join(', ');
+    if (typeof v === 'object') {
+      return Object.entries(v)
+        .filter(([, val]) => val != null && !(Array.isArray(val) && !val.length))
+        .map(([k, val]) => `<div><b>${esc(k)}:</b> ${renderReasoningValue(val)}</div>`)
+        .join('');
+    }
+    return esc(String(v));
+  }
+
   function esc(s) {
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 </script>
 </body>

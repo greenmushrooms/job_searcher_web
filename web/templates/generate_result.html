@@ -1,0 +1,12 @@
+{{- /* Confirmation swapped in after POST /ui/jobs/{id}/generate. The tailored
+       selection is now persisted in web.jobs_resume. PDF preview lands in a
+       later slice. */ -}}
+<div class="generate-ok">
+  <b>Generated</b> — {{ .KeptCount }} bullet{{ if ne .KeptCount 1 }}s{{ end }} kept
+  · resume <code>{{ .ResumeVersion }}</code>
+  · {{ .GeneratedAt }}
+  <div class="generate-actions">
+    <a class="generate-preview" target="_blank" rel="noopener"
+       href="/ui/jobs/{{ .JobID }}/resume.pdf?profile={{ .Profile }}">Preview PDF ↗</a>
+  </div>
+</div>

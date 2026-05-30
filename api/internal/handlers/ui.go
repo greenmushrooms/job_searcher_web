@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/applications"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 )
 
@@ -34,9 +35,7 @@ type statusRowView struct {
 func (h *UIHandler) StatusRow(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	status, notesStr, profile := parseStatusInputs(r)
-	if profile == "" {
-		profile = "Slava"
-	}
+	profile = profiles.Resolve(r.Context(), profile)
 	var notes *string
 	if notesStr != "" {
 		notes = &notesStr

@@ -1,0 +1,41 @@
+{{- /* Right-hand job summary + review actions. Apply/Skip/Interview post to
+       row-status; the response re-renders this summary (main swap) and OOB-swaps
+       the list row's badge. */ -}}
+<div class="job-summary" id="summary-{{ .ID }}">
+  <div class="js-row1">
+    <h2>
+      {{- if .URL }}<a href="{{ .URL }}" target="_blank" rel="noopener">{{ .Title }}</a>
+      {{- else }}{{ .Title }}{{ end }}
+      {{- if .Verdict }} <span class="js-verdict">{{ .Verdict }}</span>{{ end }}
+    </h2>
+    <span class="js-score">{{ .Score }}</span>
+  </div>
+  <div class="js-meta">
+    {{- .Company }} · {{ .Location }}{{ if .IsRemote }} · remote{{ end }}
+    · posted {{ .DatePosted }} · eval {{ .EvalDate }}
+    {{- if .Compensation }} · {{ .Compensation }}{{ end }}
+  </div>
+  {{- if .Summary }}
+  <div class="js-label">summary</div>
+  <div class="js-text">{{ .Summary }}</div>
+  {{- end }}
+  {{- if .TechStack }}
+  <div class="js-label">tech stack</div>
+  <div class="js-text">{{ .TechStack }}</div>
+  {{- end }}
+  <div class="js-actions">
+    <span class="js-status">status: <b>{{ if .Status }}{{ .Status }}{{ else }}undecided{{ end }}</b></span>
+    <button class="small"
+            hx-post="/ui/jobs/{{ .ID }}/row-status"
+            hx-vals='{"status":"applied","profile":"{{ .Profile }}"}'
+            hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Apply ✓</button>
+    <button class="small secondary"
+            hx-post="/ui/jobs/{{ .ID }}/row-status"
+            hx-vals='{"status":"skipped","profile":"{{ .Profile }}"}'
+            hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Skip ✗</button>
+    <button class="small alt"
+            hx-post="/ui/jobs/{{ .ID }}/row-status"
+            hx-vals='{"status":"interview","profile":"{{ .Profile }}"}'
+            hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Interview ★</button>
+  </div>
+</div>

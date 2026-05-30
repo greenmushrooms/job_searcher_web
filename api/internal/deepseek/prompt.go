@@ -8,9 +8,13 @@ import (
 
 // systemPrompt frames the task. Kept short and focused — the schema lives
 // in the user message where it's adjacent to the data.
+//
+// The model recommends REMOVALS only: the resume render starts from the full
+// bullet pool (everything kept), and the LLM output is a thin diff of what to
+// drop. This keeps the model's job conservative and its output small.
 const systemPrompt = `You help tailor a resume to a specific job posting.
 
-For each resume bullet, decide whether to KEEP it (relevant to the job) or DROP it (not relevant). Keep bullets that demonstrate skills, achievements, or experience the job actually asks for. Drop bullets that don't add signal for this specific role.
+The bullets below are the candidate's full resume. Identify ONLY the bullets that should be REMOVED for this job — ones that add no signal for this specific role. Every bullet you do not list is kept by default. Be conservative: remove a bullet only when it is clearly off-topic or redundant for this job.
 
 You return ONLY valid JSON in the exact schema specified by the user. No prose, no markdown, no commentary.`
 
@@ -56,17 +60,18 @@ func buildPrompt(jobDescription string, bullets []resume.Bullet) string {
 
 	b.WriteString(`
 === RESPONSE SCHEMA ===
-Return ONLY this JSON, with one decision per bullet above:
+Return ONLY this JSON, listing ONLY the bullets to remove:
 {
-  "decisions": [
-    {"role_id": "<role>", "bullet_id": "<bullet>", "keep": true | false, "reason": "<one sentence>"}
+  "removals": [
+    {"role_id": "<role>", "bullet_id": "<bullet>", "reason": "<one sentence>"}
   ]
 }
 
 Rules:
-- Include every bullet from above, in any order.
-- "reason" must be one short sentence (under 25 words) tying the bullet to the job description.
-- Default to KEEP when uncertain — the user will trim further. Drop only when clearly off-topic.
+- List ONLY bullets to remove. Every bullet you omit is kept.
+- "reason" must be one short sentence (under 25 words) on why the bullet is irrelevant or redundant for this job.
+- Remove only clearly off-topic or redundant bullets. When in doubt, keep it (omit it).
+- If nothing should be removed, return {"removals": []}.
 `)
 	return b.String()
 }

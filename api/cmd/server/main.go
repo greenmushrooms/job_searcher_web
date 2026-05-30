@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,7 +18,9 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/finalizations"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/handlers"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
 )
 
 func main() {
@@ -49,6 +52,10 @@ func main() {
 	appsRepo := applications.New(pool)
 	jobsRepo := jobs.New(pool)
 	finalsRepo := finalizations.New(pool)
+	resumeRepo := resume.NewRepo(pool)
+
+	// Validate ?profile against the pipeline's known profiles (TTL-cached).
+	profiles.Init(jobsRepo)
 
 	dsClient, dsErr := deepseek.NewFromEnv()
 	if dsErr != nil {
@@ -58,9 +65,11 @@ func main() {
 	jh := &handlers.JobsHandler{Repo: jobsRepo}
 	ah := &handlers.ApplicationsHandler{Repo: appsRepo}
 	uh := &handlers.UIHandler{Repo: appsRepo, Renderer: renderer}
+	juh := &handlers.JobUIHandler{Jobs: jobsRepo, Apps: appsRepo, Renderer: renderer}
 	rh := &handlers.ResumeHandler{
 		Jobs:          jobsRepo,
 		Finalizations: finalsRepo,
+		Resumes:       resumeRepo,
 		DeepSeek:      dsClient,
 		Pool:          pool,
 		Renderer:      renderer,
@@ -98,6 +107,20 @@ func main() {
 			r.Use(middleware.Timeout(30 * time.Second))
 			r.Post("/jobs/{id}/status-row", uh.StatusRow)
 			r.Get("/jobs/{id}/draft", rh.DraftFragment)
+			r.Post("/jobs/{id}/generate", rh.GenerateResume)
+			r.Get("/jobs/{id}/resume.pdf", rh.ResumePDF)
+
+			// Server-rendered job list + summary + apply/skip (OOB row update).
+			r.Get("/jobs", juh.JobList)
+			r.Get("/jobs/{id}/workspace", juh.JobWorkspace)
+			r.Get("/jobs/{id}/summary", juh.JobSummary)
+			r.Post("/jobs/{id}/row-status", juh.RowStatus)
+
+			// Left-hand canonical resume editor (htmx fragments).
+			r.Get("/resume", rh.ResumeEditor)
+			r.Post("/resume/bullets/{roleID}", rh.AddBullet)
+			r.Post("/resume/bullets/{roleID}/{bulletID}", rh.SaveBullet)
+			r.Post("/resume/bullets/{roleID}/{bulletID}/retire", rh.RemoveBullet)
 		})
 		// HTML trigger for a fresh DeepSeek draft — same 120s budget as the
 		// JSON endpoint above.
@@ -107,7 +130,16 @@ func main() {
 		})
 	})
 
-	r.Handle("/*", http.FileServer(http.Dir(webDir)))
+	// Serve web/ as static, but never the templates/ subdir — those are Go
+	// template sources rendered server-side, not public assets.
+	fs := http.FileServer(http.Dir(webDir))
+	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/templates/") {
+			http.NotFound(w, req)
+			return
+		}
+		fs.ServeHTTP(w, req)
+	}))
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {

@@ -1,0 +1,5 @@
+{{- /* Response to POST /ui/jobs/{id}/row-status: the refreshed summary swaps
+       into the detail pane (main target), and the row (with hx-swap-oob) updates
+       the list badge out-of-band — one request, both panes in sync, no JS. */ -}}
+{{ template "job_summary" .Summary }}
+{{ template "job_row" .Row }}

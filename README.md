@@ -54,3 +54,19 @@ go run ./cmd/server
 
 - `001_web_schema.sql` — creates `web` schema and `web.applications`. Copies the 10 prototype rows from `public.applications` (the table created by `job_searcher_2/migrations/003_applications.sql`, which has been removed from that repo's history of new migrations and is now owned here).
 - `public.applications` is intentionally left in place until the Flask dashboard's POST `/api/v1/jobs/<id>/status` is retired in favour of this service.
+- `005_user_profile.sql` — moves the canonical resume out of `resume_htmx/resume_data.json` into `web.user_profile` + `web.resume_roles` / `web.resume_bullets` / `web.resume_skills` / `web.resume_education`, keyed by `sys_profile`. `resume.Load()` now reads from here.
+
+Apply + import (the box has no `psql`, so `cmd/seed-resume` applies the DDL and loads the JSON in one step):
+
+```bash
+cd api && go run ./cmd/seed-resume          # profile=Slava, file from RESUME_JSON_PATH
+# re-run any time to re-sync the DB with edits still made in resume_htmx
+```
+- `006_jobs_resume.sql` — renames `web.resume_finalizations` → `web.jobs_resume` (the per-job tailored resume), adds a `removals` snapshot + `generated_at`, and widens the `application_events` event-type CHECK to allow `resume_generated`.
+- `007_job_review.sql` — renames `web.applications` → `web.job_review` (per-job review state: applied/skipped/interview). "Unread" in the UI = no row here yet.
+
+Apply any later migration with the generic runner (no `psql` needed):
+
+```bash
+cd api && go run ./cmd/migrate -file ../migrations/007_job_review.sql
+```

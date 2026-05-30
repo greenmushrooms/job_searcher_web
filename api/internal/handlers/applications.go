@@ -39,8 +39,8 @@ func (h *ApplicationsHandler) SetStatus(w http.ResponseWriter, r *http.Request) 
 			validList = append(validList, s)
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error":  "invalid status",
-			"valid":  validList,
+			"error": "invalid status",
+			"valid": validList,
 		})
 		return
 	case errors.Is(err, applications.ErrJobNotFound):

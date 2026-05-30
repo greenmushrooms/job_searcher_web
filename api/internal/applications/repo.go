@@ -11,7 +11,7 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 )
 
-// ValidStatuses mirrors the CHECK constraint on web.applications.status. Kept
+// ValidStatuses mirrors the CHECK constraint on web.job_review.status. Kept
 // here so handlers can reject early before hitting the DB.
 var ValidStatuses = map[string]bool{
 	"applied":   true,
@@ -65,7 +65,7 @@ func (r *Repo) Upsert(ctx context.Context, jobID, sysProfile, status string, not
 
 	var app Application
 	err = r.q.QueryRow(ctx, `
-        INSERT INTO web.applications (job_id, sys_profile, status, notes, created_at, updated_at)
+        INSERT INTO web.job_review (job_id, sys_profile, status, notes, created_at, updated_at)
         VALUES ($1, $2, $3, $4, NOW(), NOW())
         ON CONFLICT (job_id, sys_profile) DO UPDATE
         SET status     = EXCLUDED.status,
@@ -97,7 +97,7 @@ func (r *Repo) Get(ctx context.Context, jobID, sysProfile string) (*Application,
 	var app Application
 	err := r.q.QueryRow(ctx, `
         SELECT job_id, sys_profile, status, notes, created_at::text, updated_at::text
-        FROM web.applications
+        FROM web.job_review
         WHERE job_id = $1 AND sys_profile = $2
     `, jobID, sysProfile).Scan(
 		&app.JobID, &app.SysProfile, &app.Status, &app.Notes,

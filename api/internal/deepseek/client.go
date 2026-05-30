@@ -24,7 +24,8 @@ import (
 // PromptVersion is logged into every resume_drafted event so we can later
 // retro the LLM's behaviour against the exact prompt that produced it.
 // Bump when the prompt template, system instruction, or output schema changes.
-const PromptVersion = "v1"
+// v2: removals-only schema (was per-bullet keep/drop decisions).
+const PromptVersion = "v2"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%
@@ -40,10 +41,12 @@ var modelPricing = map[string]pricing{
 	"deepseek-reasoner": {inputPer1M: 0.14, outputPer1M: 0.28},
 }
 
-type Decision struct {
+// Removal is one bullet the LLM recommends dropping for this job. Bullets not
+// listed in the draft's removals are kept by default — the render starts from
+// the full resume and treats removals as a diff over it.
+type Removal struct {
 	RoleID   string `json:"role_id"`
 	BulletID string `json:"bullet_id"`
-	Keep     bool   `json:"keep"`
 	Reason   string `json:"reason"`
 }
 
@@ -56,10 +59,10 @@ type Usage struct {
 }
 
 type DraftResult struct {
-	Decisions     []Decision `json:"decisions"`
-	Usage         Usage      `json:"usage"`
-	Model         string     `json:"model"`
-	PromptVersion string     `json:"prompt_version"`
+	Removals      []Removal `json:"removals"`
+	Usage         Usage     `json:"usage"`
+	Model         string    `json:"model"`
+	PromptVersion string    `json:"prompt_version"`
 }
 
 type Client struct {
@@ -96,7 +99,7 @@ func NewFromEnv() (*Client, error) {
 var ErrNotConfigured = errors.New("DEEPSEEK_API_KEY not set")
 
 // Draft sends the job description + active bullet pool to the LLM and
-// returns per-bullet keep/drop decisions.
+// returns the bullets it recommends removing for this job.
 func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []resume.Bullet) (*DraftResult, error) {
 	prompt := buildPrompt(jobDescription, bullets)
 
@@ -123,11 +126,11 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 	}
 
 	var parsed struct {
-		Decisions []Decision `json:"decisions"`
+		Removals []Removal `json:"removals"`
 	}
 	content := resp.Choices[0].Message.Content
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
-		return nil, fmt.Errorf("decode decisions JSON: %w (content=%s)", err, truncate(content, 500))
+		return nil, fmt.Errorf("decode removals JSON: %w (content=%s)", err, truncate(content, 500))
 	}
 
 	usage := Usage{
@@ -137,7 +140,7 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 		CostUSD:          estimateCost(c.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens),
 	}
 	return &DraftResult{
-		Decisions:     parsed.Decisions,
+		Removals:      parsed.Removals,
 		Usage:         usage,
 		Model:         c.Model,
 		PromptVersion: PromptVersion,
