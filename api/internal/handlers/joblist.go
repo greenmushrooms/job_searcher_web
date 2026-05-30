@@ -11,6 +11,7 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
 // JobUIHandler serves the server-rendered (htmx) job list + summary. The list
@@ -18,9 +19,10 @@ import (
 // renders "unread". Apply/Skip/Interview live in the summary and OOB-swap the
 // matching list row so the badge updates without a full list reload.
 type JobUIHandler struct {
-	Jobs     *jobs.Repo
-	Apps     *applications.Repo
-	Renderer *render.Renderer
+	Jobs      *jobs.Repo
+	Apps      *applications.Repo
+	Templates *templates.Repo
+	Renderer  *render.Renderer
 }
 
 type jobRowView struct {
@@ -101,9 +103,10 @@ func (h *JobUIHandler) JobList(w http.ResponseWriter, r *http.Request) {
 // jobWorkspaceView wraps the summary plus the ids the workspace shell needs to
 // lazy-load the draft for this job.
 type jobWorkspaceView struct {
-	JobID   string
-	Profile string
-	Summary jobSummaryView
+	JobID    string
+	Profile  string
+	Summary  jobSummaryView
+	Controls resumeControlsView
 }
 
 // JobWorkspace handles GET /ui/jobs/{id}/workspace — the per-job right pane:
@@ -121,10 +124,16 @@ func (h *JobUIHandler) JobWorkspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "job not found", http.StatusNotFound)
 		return
 	}
+	controls, err := resumeControls(r.Context(), h.Templates, id, profile, "", false)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	h.Renderer.HTML(w, http.StatusOK, "job_workspace", jobWorkspaceView{
-		JobID:   id,
-		Profile: profile,
-		Summary: toSummaryView(*j, profile),
+		JobID:    id,
+		Profile:  profile,
+		Summary:  toSummaryView(*j, profile),
+		Controls: controls,
 	})
 }
 

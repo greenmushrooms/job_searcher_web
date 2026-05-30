@@ -21,6 +21,7 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
 func main() {
@@ -53,6 +54,7 @@ func main() {
 	jobsRepo := jobs.New(pool)
 	finalsRepo := finalizations.New(pool)
 	resumeRepo := resume.NewRepo(pool)
+	templatesRepo := templates.New(pool)
 
 	// Validate ?profile against the pipeline's known profiles (TTL-cached).
 	profiles.Init(jobsRepo)
@@ -65,11 +67,12 @@ func main() {
 	jh := &handlers.JobsHandler{Repo: jobsRepo}
 	ah := &handlers.ApplicationsHandler{Repo: appsRepo}
 	uh := &handlers.UIHandler{Repo: appsRepo, Renderer: renderer}
-	juh := &handlers.JobUIHandler{Jobs: jobsRepo, Apps: appsRepo, Renderer: renderer}
+	juh := &handlers.JobUIHandler{Jobs: jobsRepo, Apps: appsRepo, Templates: templatesRepo, Renderer: renderer}
 	rh := &handlers.ResumeHandler{
 		Jobs:          jobsRepo,
 		Finalizations: finalsRepo,
 		Resumes:       resumeRepo,
+		Templates:     templatesRepo,
 		DeepSeek:      dsClient,
 		Pool:          pool,
 		Renderer:      renderer,
@@ -108,7 +111,14 @@ func main() {
 			r.Post("/jobs/{id}/status-row", uh.StatusRow)
 			r.Get("/jobs/{id}/draft", rh.DraftFragment)
 			r.Post("/jobs/{id}/generate", rh.GenerateResume)
+			r.Post("/jobs/{id}/save-template", rh.SaveTemplate)
 			r.Get("/jobs/{id}/resume.pdf", rh.ResumePDF)
+
+			// Resume template manager (rename / delete / set default).
+			r.Get("/resume/templates", rh.TemplatesManager)
+			r.Post("/resume/templates/{templateID}/rename", rh.RenameTemplate)
+			r.Post("/resume/templates/{templateID}/delete", rh.DeleteTemplate)
+			r.Post("/resume/templates/{templateID}/default", rh.SetDefaultTemplate)
 
 			// Server-rendered job list + summary + apply/skip (OOB row update).
 			r.Get("/jobs", juh.JobList)

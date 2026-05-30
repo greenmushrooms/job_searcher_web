@@ -1,57 +1,81 @@
-<!-- Resume draft fragment: per-bullet keep/drop + editable final text (with AI
-     rewrites pre-filled), rendered as a diff over the selected template's
-     bullet pool. Swapped into .draft-panel. -->
+{{- /* Tailored-resume draft fragment, swapped into #job-draft. Per-bullet
+       keep/drop + an editable final-text box (AI rewrites pre-filled, original
+       shown for reference). Generate persists; "Save as template" snapshots the
+       current selection/edits into a reusable variant. No JS. */ -}}
 <div class="draft-fragment">
-  {{ if .NoDraft }}
-    <div class="draft-empty">
-      <p class="muted">No resume draft yet for this job.</p>
-      <button hx-post="/ui/jobs/{{ .JobID }}/draft"
-              hx-vals='{"profile": "{{ .Profile }}", "template": "{{ .TemplateID }}"}'
-              hx-target="closest .draft-panel"
-              hx-swap="innerHTML">
-        Draft résumé with AI
-      </button>
-    </div>
-  {{ else }}
-    <div class="draft-head">
-      <span class="muted">Drafted {{ .DraftedAt }} · {{ .Model }}
-        · resume {{ .ResumeVersion }}
-        {{ if gt .CostUSD 0.0 }}· ${{ printf "%.4f" .CostUSD }}{{ end }}</span>
-      <span class="kept-count">{{ .KeptCount }}/{{ .TotalCount }} kept{{ if gt .RewriteCount 0 }} · {{ .RewriteCount }} rewritten{{ end }}</span>
-    </div>
+  {{- if .NoDraft }}
+  <div class="draft-empty">
+    <p>No draft yet for <code>{{ .JobID }}</code> (profile <code>{{ .Profile }}</code>).</p>
+    <button class="draft-trigger"
+            hx-post="/ui/jobs/{{ .JobID }}/draft"
+            hx-vals='{"profile":"{{ .Profile }}","template":"{{ .TemplateID }}"}'
+            hx-target="#job-draft" hx-swap="innerHTML"
+            hx-indicator="#draft-spinner">
+      Draft with AI (calls DeepSeek, ~60s)
+    </button>
+    <span id="draft-spinner" class="htmx-indicator">working…</span>
+  </div>
+  {{- else }}
+  <header class="draft-meta">
+    <span class="meta-item"><b>kept</b> {{ .KeptCount }}/{{ .TotalCount }}</span>
+    {{- if gt .RewriteCount 0 }}<span class="meta-item"><b>rewritten</b> {{ .RewriteCount }}</span>{{ end }}
+    <span class="meta-item"><b>model</b> {{ .Model }}</span>
+    <span class="meta-item"><b>resume</b> {{ .ResumeVersion }}</span>
+    <span class="meta-item"><b>drafted</b> {{ .DraftedAt }}</span>
+    {{- if gt .CostUSD 0.0 }}<span class="meta-item"><b>cost</b> ${{ printf "%.4f" .CostUSD }}</span>{{ end }}
+    <button class="draft-refresh small"
+            hx-post="/ui/jobs/{{ .JobID }}/draft"
+            hx-vals='{"profile":"{{ .Profile }}","template":"{{ .TemplateID }}"}'
+            hx-target="#job-draft" hx-swap="innerHTML"
+            hx-confirm="Re-draft? This calls DeepSeek again (~60s)."
+            hx-indicator="#draft-spinner">
+      re-draft
+    </button>
+    <span id="draft-spinner" class="htmx-indicator">working…</span>
+  </header>
 
-    <form hx-post="/ui/jobs/{{ .JobID }}/generate"
-          hx-target="closest .draft-panel"
-          hx-swap="innerHTML">
-      <input type="hidden" name="profile" value="{{ .Profile }}">
-      <input type="hidden" name="template" value="{{ .TemplateID }}">
-      <input type="hidden" name="resume_version" value="{{ .ResumeVersion }}">
+  <form class="draft-form"
+        hx-post="/ui/jobs/{{ .JobID }}/generate"
+        hx-target="#job-draft" hx-swap="innerHTML">
+    <input type="hidden" name="profile" value="{{ .Profile }}">
+    <input type="hidden" name="template" value="{{ .TemplateID }}">
+    <input type="hidden" name="resume_version" value="{{ .ResumeVersion }}">
 
-      {{ range .Roles }}
-        <div class="draft-role">
-          <div class="draft-role-head">{{ .RoleTitle }} — {{ .RoleCompany }}
-            {{ if .RoleDates }}<span class="muted">({{ .RoleDates }})</span>{{ end }}</div>
-          {{ range .Bullets }}
-            <div class="draft-bullet {{ if not .Keep }}dropped{{ end }}">
-              <label class="draft-keep">
-                <input type="checkbox" name="kept_bullet_ids"
-                       value="{{ .CompositeID }}" {{ if .Keep }}checked{{ end }}>
-                keep
-              </label>
-              <textarea name="text_{{ .CompositeID }}" rows="2">{{ if .NewText }}{{ .NewText }}{{ else }}{{ .Text }}{{ end }}</textarea>
-              {{ if .NewText }}
-                <div class="rewrite-note muted">
-                  ✎ AI rewrite{{ if .RewriteReason }} — {{ .RewriteReason }}{{ end }}
-                  <div class="rewrite-orig">was: {{ .Text }}</div>
-                </div>
-              {{ end }}
-              {{ if .Reason }}<div class="drop-reason muted">drop: {{ .Reason }}</div>{{ end }}
-            </div>
-          {{ end }}
+    {{- range .Roles }}
+    <fieldset class="draft-role" data-role-id="{{ .RoleID }}">
+      <legend>
+        {{- if .RoleTitle }}<span class="role-title">{{ .RoleTitle }}</span>{{ end }}
+        {{- if .RoleCompany }} <span class="role-company">— {{ .RoleCompany }}</span>{{ end }}
+        {{- if .RoleDates }} <span class="role-dates">({{ .RoleDates }})</span>{{ end }}
+      </legend>
+      {{- range .Bullets }}
+      <div class="draft-bullet{{ if not .Keep }} dropped{{ end }}{{ if .NewText }} rewritten{{ end }}">
+        <label class="draft-keep">
+          <input type="checkbox" name="kept_bullet_ids" value="{{ .CompositeID }}"{{ if .Keep }} checked{{ end }}>
+          keep
+        </label>
+        <textarea name="text_{{ .CompositeID }}" rows="2" class="bullet-text">{{ if .NewText }}{{ .NewText }}{{ else }}{{ .Text }}{{ end }}</textarea>
+        {{- if .NewText }}
+        <div class="bullet-rewrite">✎ AI rewrite{{ if .RewriteReason }} — {{ .RewriteReason }}{{ end }}
+          <div class="bullet-orig">was: {{ .Text }}</div>
         </div>
-      {{ end }}
+        {{- end }}
+        {{- if .Reason }}<div class="bullet-reason">drop: {{ .Reason }}</div>{{ end }}
+      </div>
+      {{- end }}
+    </fieldset>
+    {{- end }}
 
-      <button type="submit">Generate tailored résumé</button>
-    </form>
-  {{ end }}
+    <div class="draft-actions">
+      <input type="text" name="name" class="tpl-name" placeholder="Template name…">
+      <button type="button" class="small secondary"
+              hx-post="/ui/jobs/{{ .JobID }}/save-template"
+              hx-include="closest form"
+              hx-target="#job-draft" hx-swap="innerHTML">
+        Save as template
+      </button>
+      <button type="submit" class="draft-finalize">Generate tailored résumé</button>
+    </div>
+  </form>
+  {{- end }}
 </div>

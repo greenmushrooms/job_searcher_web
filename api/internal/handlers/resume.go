@@ -18,12 +18,14 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
 type ResumeHandler struct {
 	Jobs          *jobs.Repo
 	Finalizations *finalizations.Repo
 	Resumes       *resume.Repo     // writes to the canonical resume (left editor)
+	Templates     *templates.Repo  // reusable resume variants
 	DeepSeek      *deepseek.Client // may be nil if not configured
 	Pool          *pgxpool.Pool    // for writing resume_drafted event directly
 	Renderer      *render.Renderer // for /ui/* HTML fragments
@@ -308,6 +310,216 @@ func templateOrDefault(t string) string {
 		return resume.DefaultTemplateID
 	}
 	return t
+}
+
+// ── resume templates (Slice B/C) ─────────────────────────────────────────────
+
+// templateOpt is one entry in the template dropdown.
+type templateOpt struct {
+	ID        string
+	Name      string
+	IsDefault bool
+}
+
+// resumeControlsView feeds web/templates/resume_controls.html — the template
+// dropdown above the per-job draft panel.
+type resumeControlsView struct {
+	JobID      string
+	Profile    string
+	TemplateID string
+	Templates  []templateOpt
+	OOB        bool
+}
+
+// resumeControls builds the dropdown: a synthetic "Full résumé" (the whole
+// canonical pool) followed by the profile's stored templates. When templateID
+// is empty it resolves to the profile's default template, else the full pool.
+func resumeControls(ctx context.Context, repo *templates.Repo, jobID, profile, templateID string, oob bool) (resumeControlsView, error) {
+	list, err := repo.List(ctx, profile)
+	if err != nil {
+		return resumeControlsView{}, err
+	}
+	opts := make([]templateOpt, 0, len(list)+1)
+	opts = append(opts, templateOpt{ID: resume.DefaultTemplateID, Name: "Full résumé (all bullets)"})
+	defaultID := ""
+	for _, t := range list {
+		opts = append(opts, templateOpt{ID: t.ID, Name: t.Name, IsDefault: t.IsDefault})
+		if t.IsDefault {
+			defaultID = t.ID
+		}
+	}
+	if templateID == "" {
+		if defaultID != "" {
+			templateID = defaultID
+		} else {
+			templateID = resume.DefaultTemplateID
+		}
+	}
+	return resumeControlsView{
+		JobID:      jobID,
+		Profile:    profile,
+		TemplateID: templateID,
+		Templates:  opts,
+		OOB:        oob,
+	}, nil
+}
+
+type templateSavedView struct {
+	JobID      string
+	Profile    string
+	TemplateID string
+	Name       string
+	Controls   resumeControlsView
+}
+
+// SaveTemplate handles POST /ui/jobs/{id}/save-template — snapshot the current
+// kept selection + edited text into a new reusable template. An override is
+// stored only where the final text differs from the canonical bullet, so the
+// template stays linked to canonical for unchanged bullets.
+func (h *ResumeHandler) SaveTemplate(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "template name required", http.StatusBadRequest)
+		return
+	}
+	kept := r.Form["kept_bullet_ids"]
+
+	canonRes, err := resume.LoadProfile(r.Context(), h.Pool, profile)
+	if err != nil {
+		http.Error(w, "resume load: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	canon := make(map[string]string, len(canonRes.Bullets))
+	for _, b := range canonRes.Bullets {
+		canon[b.CompositeID()] = b.Text
+	}
+
+	var bullets []templates.Bullet
+	for i, cid := range kept {
+		dot := strings.IndexByte(cid, '.')
+		if dot < 0 {
+			continue
+		}
+		text := r.FormValue("text_" + cid)
+		if strings.TrimSpace(text) == "" {
+			text = canon[cid]
+		}
+		var override *string
+		if text != canon[cid] {
+			t := text
+			override = &t
+		}
+		bullets = append(bullets, templates.Bullet{
+			RoleID:       cid[:dot],
+			BulletID:     cid[dot+1:],
+			OverrideText: override,
+			SortOrder:    i,
+		})
+	}
+
+	id, err := h.Templates.Save(r.Context(), profile, name, bullets)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, _ = h.Pool.Exec(r.Context(), `
+        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
+        VALUES ($1, $2, 'resume_template_saved', $3::jsonb)
+    `, profile, jobID, fmt.Sprintf(`{"template_id":%q,"name":%q,"bullet_count":%d}`, id, name, len(bullets)))
+
+	controls, err := resumeControls(r.Context(), h.Templates, jobID, profile, id, true)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.Renderer.HTML(w, http.StatusOK, "template_saved", templateSavedView{
+		JobID:      jobID,
+		Profile:    profile,
+		TemplateID: id,
+		Name:       name,
+		Controls:   controls,
+	})
+}
+
+// ── template manager (Slice C) ───────────────────────────────────────────────
+
+type templateManagerView struct {
+	JobID     string
+	Profile   string
+	Templates []templates.Template
+	// Controls, when set, is rendered as an OOB dropdown refresh after a
+	// mutation so an open job's selector stays in sync.
+	Controls *resumeControlsView
+}
+
+// TemplatesManager handles GET /ui/resume/templates — the manage panel (rename,
+// delete, set default). The optional ?job= is carried so "back" can reload that
+// job's draft.
+func (h *ResumeHandler) TemplatesManager(w http.ResponseWriter, r *http.Request) {
+	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
+	jobID := r.URL.Query().Get("job")
+	list, err := h.Templates.List(r.Context(), profile)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.Renderer.HTML(w, http.StatusOK, "template_manager", templateManagerView{
+		JobID:     jobID,
+		Profile:   profile,
+		Templates: list,
+	})
+}
+
+func (h *ResumeHandler) RenameTemplate(w http.ResponseWriter, r *http.Request) {
+	h.templateMutation(w, r, func(ctx context.Context, profile, id string) error {
+		return h.Templates.Rename(ctx, profile, id, strings.TrimSpace(r.FormValue("name")))
+	})
+}
+
+func (h *ResumeHandler) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
+	h.templateMutation(w, r, func(ctx context.Context, profile, id string) error {
+		return h.Templates.Delete(ctx, profile, id)
+	})
+}
+
+func (h *ResumeHandler) SetDefaultTemplate(w http.ResponseWriter, r *http.Request) {
+	h.templateMutation(w, r, func(ctx context.Context, profile, id string) error {
+		return h.Templates.SetDefault(ctx, profile, id)
+	})
+}
+
+// templateMutation runs a rename/delete/set-default then re-renders the manager,
+// with an OOB dropdown refresh when a job is open.
+func (h *ResumeHandler) templateMutation(w http.ResponseWriter, r *http.Request, mutate func(context.Context, string, string) error) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
+	id := chi.URLParam(r, "templateID")
+	jobID := r.FormValue("job")
+	if err := mutate(r.Context(), profile, id); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	list, err := h.Templates.List(r.Context(), profile)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	view := templateManagerView{JobID: jobID, Profile: profile, Templates: list}
+	if jobID != "" {
+		if controls, err := resumeControls(r.Context(), h.Templates, jobID, profile, "", true); err == nil {
+			view.Controls = &controls
+		}
+	}
+	h.Renderer.HTML(w, http.StatusOK, "template_manager", view)
 }
 
 // ── HTML fragment routes ────────────────────────────────────────────────────
@@ -595,4 +807,34 @@ func buildDraftView(jobID, profile, draftedAt string, p *draftedEventPayload, re
 	}
 
 	return view
+}
+
+// buildTemplateBullets turns the kept selection + form text into template
+// bullets. An override is recorded only when the final text differs from the
+// canonical bullet, so unchanged bullets stay linked (override nil) and pick up
+// future canonical edits.
+func buildTemplateBullets(kept []string, r *http.Request, canon map[string]string) []templates.Bullet {
+	var out []templates.Bullet
+	for i, cid := range kept {
+		dot := strings.IndexByte(cid, '.')
+		if dot < 0 {
+			continue
+		}
+		text := r.FormValue("text_" + cid)
+		if strings.TrimSpace(text) == "" {
+			text = canon[cid]
+		}
+		var override *string
+		if text != canon[cid] {
+			t := text
+			override = &t
+		}
+		out = append(out, templates.Bullet{
+			RoleID:       cid[:dot],
+			BulletID:     cid[dot+1:],
+			OverrideText: override,
+			SortOrder:    i,
+		})
+	}
+	return out
 }
