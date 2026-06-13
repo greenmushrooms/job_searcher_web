@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/applications"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/finalizations"
@@ -21,6 +22,7 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resumemaster"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
@@ -53,6 +55,8 @@ func main() {
 	appsRepo := applications.New(pool)
 	jobsRepo := jobs.New(pool)
 	finalsRepo := finalizations.New(pool)
+	coverRepo := coverletters.New(pool)
+	masterRepo := resumemaster.New(pool)
 	resumeRepo := resume.NewRepo(pool)
 	templatesRepo := templates.New(pool)
 
@@ -71,6 +75,8 @@ func main() {
 	rh := &handlers.ResumeHandler{
 		Jobs:          jobsRepo,
 		Finalizations: finalsRepo,
+		CoverLetters:  coverRepo,
+		Master:        masterRepo,
 		Resumes:       resumeRepo,
 		Templates:     templatesRepo,
 		DeepSeek:      dsClient,
@@ -98,9 +104,9 @@ func main() {
 			r.Post("/jobs/{id}/finalize-resume", rh.Finalize)
 		})
 		// LLM endpoint: DeepSeek-v4-pro for ~40 bullets typically takes
-		// 20-60s. 120s gives headroom without hanging indefinitely.
+		// 20-110s+. 180s gives headroom without hanging indefinitely.
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.Timeout(120 * time.Second))
+			r.Use(middleware.Timeout(180 * time.Second))
 			r.Post("/jobs/{id}/draft-resume", rh.Draft)
 		})
 	})
@@ -110,9 +116,16 @@ func main() {
 			r.Use(middleware.Timeout(30 * time.Second))
 			r.Post("/jobs/{id}/status-row", uh.StatusRow)
 			r.Get("/jobs/{id}/draft", rh.DraftFragment)
+			r.Post("/jobs/{id}/apply-ai", rh.ApplyAI)
 			r.Post("/jobs/{id}/generate", rh.GenerateResume)
 			r.Post("/jobs/{id}/save-template", rh.SaveTemplate)
+			r.Post("/jobs/{id}/replace-template", rh.ReplaceTemplate)
 			r.Get("/jobs/{id}/resume.pdf", rh.ResumePDF)
+			r.Post("/jobs/{id}/resume.pdf", rh.GeneratePDF)
+			r.Get("/jobs/{id}/cover-letter", rh.CoverLetterFragment)
+			r.Post("/jobs/{id}/cover-letter", rh.SaveCoverLetter)
+			r.Post("/jobs/{id}/cover-letter.pdf", rh.CoverLetterPDF)
+			r.Post("/resume/master", rh.SaveMaster) // diff lab: permanent master save
 
 			// Resume template manager (rename / delete / set default).
 			r.Get("/resume/templates", rh.TemplatesManager)
@@ -132,13 +145,26 @@ func main() {
 			r.Post("/resume/bullets/{roleID}/{bulletID}", rh.SaveBullet)
 			r.Post("/resume/bullets/{roleID}/{bulletID}/retire", rh.RemoveBullet)
 		})
-		// HTML trigger for a fresh DeepSeek draft — same 120s budget as the
-		// JSON endpoint above.
+		// HTML triggers that call DeepSeek — same 180s budget as the JSON
+		// endpoint above.
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.Timeout(120 * time.Second))
+			r.Use(middleware.Timeout(180 * time.Second))
 			r.Post("/jobs/{id}/draft", rh.DraftFragmentTrigger)
+			r.Post("/jobs/{id}/cover-letter/draft", rh.DraftCoverLetter)
 		})
 	})
+
+	// Land on the current résumé workspace (jobs.html) rather than the older
+	// index.html prototype.
+	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, "/jobs.html", http.StatusFound)
+	})
+
+	// Diff-lab comparison pages — three highlighting variants of the two-pane
+	// master-vs-job résumé editor, to pick one.
+	r.Get("/v1", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v1") })
+	r.Get("/v2", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v2") })
+	r.Get("/v3", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v3") })
 
 	// Serve web/ as static, but never the templates/ subdir — those are Go
 	// template sources rendered server-side, not public assets.
@@ -153,7 +179,7 @@ func main() {
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
-		addr = ":8090"
+		addr = ":7770"
 	}
 	log.Printf("listening on %s (web=%s)", addr, webDir)
 	log.Fatal(http.ListenAndServe(addr, r))

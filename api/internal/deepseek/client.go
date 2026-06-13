@@ -26,7 +26,12 @@ import (
 // Bump when the prompt template, system instruction, or output schema changes.
 // v2: removals-only schema (was per-bullet keep/drop decisions).
 // v3: adds per-bullet rewrites alongside removals.
-const PromptVersion = "v3"
+// v4: rewrites must be concise resume-style fragments, not prose sentences.
+// v5: relevance guidance from the 2026-06-12 eval — judge by transferable
+//     competency not surface domain, awards keep-by-default, prune oldest
+//     roles hardest/consistently, reword toward the posting's stack without
+//     inventing tools.
+const PromptVersion = "v5"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%
@@ -101,7 +106,9 @@ func NewFromEnv() (*Client, error) {
 		model = "deepseek-v4-pro"
 	}
 	return &Client{
-		HTTPClient: &http.Client{Timeout: 110 * time.Second},
+		// DeepSeek v4-pro on a ~40-bullet pool ranges 60–110s+; keep this just
+		// under the 180s route timeout so the route never wins the race.
+		HTTPClient: &http.Client{Timeout: 170 * time.Second},
 		APIKey:     key,
 		BaseURL:    strings.TrimRight(base, "/"),
 		Model:      model,

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -32,10 +33,11 @@ type jobRowView struct {
 	Company  string
 	Location string
 	IsRemote bool
-	Score    string
-	EvalDate string
-	Status   string // "" == unread (no decision yet)
-	OOB      bool   // render with hx-swap-oob for out-of-band row updates
+	Score     string
+	EvalDate  string
+	Status    string // "" == unread (no decision yet)
+	HasResume bool   // a saved résumé exists for this job → 📄 badge
+	OOB       bool   // render with hx-swap-oob for out-of-band row updates
 }
 
 type jobListView struct {
@@ -68,6 +70,10 @@ type jobStatusUpdateView struct {
 	Row     jobRowView
 }
 
+// defaultListDays is how far back the job list reaches when the filter bar
+// hasn't asked for anything else: the last two weeks.
+const defaultListDays = 14
+
 // JobList handles GET /ui/jobs — the left-hand list fragment.
 func (h *JobUIHandler) JobList(w http.ResponseWriter, r *http.Request) {
 	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
@@ -87,6 +93,23 @@ func (h *JobUIHandler) JobList(w http.ResponseWriter, r *http.Request) {
 		p.DateField = v
 	}
 	p.From, p.To = q.Get("from"), q.Get("to")
+	// "days" is the filter bar's date-range dropdown: jobs from the last N
+	// days (0 = all time). It only applies when no explicit from= is given;
+	// with neither present the list defaults to the last two weeks.
+	if p.From == "" {
+		days := defaultListDays
+		if s := q.Get("days"); s != "" {
+			if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+				days = v
+			}
+		}
+		if days > 0 {
+			p.From = time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+		}
+	}
+	if v := q.Get("status"); v == "inbox" || v == "applied" || v == "skipped" || v == "interview" {
+		p.Status = v
+	}
 
 	list, err := h.Jobs.ListLite(r.Context(), p)
 	if err != nil {
@@ -190,14 +213,15 @@ func (h *JobUIHandler) RowStatus(w http.ResponseWriter, r *http.Request) {
 
 func toRowView(j jobs.Job, profile string) jobRowView {
 	v := jobRowView{
-		ID:       j.ID,
-		Profile:  profile,
-		Title:    derefOr(j.Title, "(no title)"),
-		Company:  derefOr(j.Company, ""),
-		Location: derefOr(j.Location, ""),
-		IsRemote: j.IsRemote != nil && *j.IsRemote,
-		Score:    fmtScore(j.Score),
-		EvalDate: dateOnly(j.EvalDate),
+		ID:        j.ID,
+		Profile:   profile,
+		Title:     derefOr(j.Title, "(no title)"),
+		Company:   derefOr(j.Company, ""),
+		Location:  derefOr(j.Location, ""),
+		IsRemote:  j.IsRemote != nil && *j.IsRemote,
+		Score:     fmtScore(j.Score),
+		EvalDate:  dateOnly(j.EvalDate),
+		HasResume: j.HasResume,
 	}
 	if j.Application != nil {
 		v.Status = j.Application.Status

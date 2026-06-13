@@ -38,6 +38,7 @@ type Job struct {
 	Profile      *string        `json:"profile"`
 	Country      *string        `json:"country"`
 	Application  *Application   `json:"application"`
+	HasResume    bool           `json:"has_resume"` // a generated résumé exists for (job, profile)
 }
 
 type ListParams struct {
@@ -48,6 +49,9 @@ type ListParams struct {
 	From      string // YYYY-MM-DD, optional
 	To        string // YYYY-MM-DD, optional
 	DateField string // "eval" or "posted"
+	// Status filters by review decision: "" = all, "inbox" = no decision yet,
+	// otherwise an exact job_review.status (applied/skipped/interview).
+	Status string
 }
 
 const baseSelect = `
@@ -59,7 +63,12 @@ SELECT
     j.min_amount, j.max_amount, j.interval, j.currency,
     e.avg_score, e.reasoning, e.created_at::text AS eval_date,
     e.sys_profile, j.sys_country,
-    a.status, a.notes, a.updated_at::text AS application_updated_at
+    a.status, a.notes, a.updated_at::text AS application_updated_at,
+    EXISTS (
+        SELECT 1 FROM web.jobs_resume jr
+        WHERE jr.job_id = j.id AND jr.sys_profile = e.sys_profile
+          AND COALESCE(jr.markdown, '') <> ''
+    ) AS has_resume
 FROM public.evaluated_jobs e
 JOIN public.jobspy_jobs j ON e.job_id = j.id
 LEFT JOIN web.job_review a
@@ -75,7 +84,12 @@ SELECT
     j.id, j.title, j.company, j.location, j.is_remote,
     e.avg_score, e.created_at::text AS eval_date,
     e.sys_profile,
-    a.status
+    a.status,
+    EXISTS (
+        SELECT 1 FROM web.jobs_resume jr
+        WHERE jr.job_id = j.id AND jr.sys_profile = e.sys_profile
+          AND COALESCE(jr.markdown, '') <> ''
+    ) AS has_resume
 FROM public.evaluated_jobs e
 JOIN public.jobspy_jobs j ON e.job_id = j.id
 LEFT JOIN web.job_review a
@@ -106,6 +120,15 @@ func listSuffix(p ListParams) (string, []any) {
 	if p.To != "" {
 		args = append(args, p.To)
 		where = append(where, dateCol+" <= $"+strconv.Itoa(len(args)))
+	}
+	switch p.Status {
+	case "":
+		// all
+	case "inbox":
+		where = append(where, "a.status IS NULL")
+	default:
+		args = append(args, p.Status)
+		where = append(where, "a.status = $"+strconv.Itoa(len(args)))
 	}
 
 	args = append(args, p.Limit, p.Offset)
@@ -143,7 +166,7 @@ func (r *Repo) ListLite(ctx context.Context, p ListParams) ([]Job, error) {
 		)
 		if err := rows.Scan(
 			&j.ID, &j.Title, &j.Company, &j.Location, &j.IsRemote,
-			&score, &j.EvalDate, &j.Profile, &appStat,
+			&score, &j.EvalDate, &j.Profile, &appStat, &j.HasResume,
 		); err != nil {
 			return nil, err
 		}
@@ -220,6 +243,7 @@ func (r *Repo) queryJobs(ctx context.Context, sql string, args ...any) ([]Job, e
 			&score, &reason, &j.EvalDate,
 			&j.Profile, &j.Country,
 			&appStat, &appNotes, &appUpd,
+			&j.HasResume,
 		); err != nil {
 			return nil, err
 		}

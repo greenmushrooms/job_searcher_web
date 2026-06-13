@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.local
+*.log
+.DS_Store
+README.md
+.claude
+# locally-built binaries — the image builds its own
+api/server
+api/cmd/server/server
+api/cmd/migrate/migrate

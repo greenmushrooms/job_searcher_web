@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -98,6 +99,59 @@ func (r *Repo) Save(ctx context.Context, profile, name string, bullets []Bullet)
 		return "", err
 	}
 	return id, nil
+}
+
+// SaveMarkdown creates a new markdown template (name + body) and returns its
+// id. Used by the markdown-centric flow where a template is a free-form resume
+// document rather than a structured bullet selection.
+func (r *Repo) SaveMarkdown(ctx context.Context, profile, name, markdown string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("template name required")
+	}
+	id, err := newID()
+	if err != nil {
+		return "", err
+	}
+	if _, err := r.pool.Exec(ctx, `
+		INSERT INTO web.resume_templates (sys_profile, template_id, name, markdown)
+		VALUES ($1, $2, $3, $4)`, profile, id, name, markdown); err != nil {
+		return "", fmt.Errorf("insert markdown template: %w", err)
+	}
+	return id, nil
+}
+
+// ReplaceMarkdown overwrites an existing template's markdown body.
+func (r *Repo) ReplaceMarkdown(ctx context.Context, profile, id, markdown string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE web.resume_templates SET markdown = $3, updated_at = NOW()
+		WHERE sys_profile = $1 AND template_id = $2`, profile, id, markdown)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetMarkdown returns a template's stored markdown body, or "" if the template
+// has none (e.g. a legacy structured template) or does not exist.
+func (r *Repo) GetMarkdown(ctx context.Context, profile, id string) (string, error) {
+	var md *string
+	err := r.pool.QueryRow(ctx, `
+		SELECT markdown FROM web.resume_templates
+		WHERE sys_profile = $1 AND template_id = $2`, profile, id).Scan(&md)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if md == nil {
+		return "", nil
+	}
+	return *md, nil
 }
 
 // Rename changes a template's display name.

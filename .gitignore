@@ -4,3 +4,4 @@ api/server
 api/cmd/server/server
 *.log
 .DS_Store
+.venv

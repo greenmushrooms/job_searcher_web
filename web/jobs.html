@@ -5,7 +5,7 @@
 <title>jobs — job_searcher_web</title>
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <style>
-  body { font: 14px/1.45 system-ui, sans-serif; max-width: 1200px; margin: 1.25rem auto; padding: 0 1rem; color: #222; }
+  body { font: 14px/1.45 system-ui, sans-serif; max-width: 1500px; margin: 1.25rem auto; padding: 0 1rem; color: #222; }
   h1 { font-size: 20px; margin: 0 0 .25rem; }
   .sub { color: #666; font-size: 12px; margin-bottom: 1rem; }
   button { padding: .3rem .6rem; background: #1a4ed8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-size: 13px; }
@@ -17,7 +17,24 @@
   .layout { display: grid; grid-template-columns: 380px 1fr; gap: .9rem; align-items: start; }
   @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
 
-  .job-list { border: 1px solid #e3e3e3; border-radius: 6px; max-height: 84vh; overflow-y: auto; background: #fff; }
+  /* error banner — htmx failures land here instead of dying silently */
+  #error-banner { display: none; position: sticky; top: .5rem; z-index: 50; background: #ffeef0; border: 1px solid #b00020; color: #8a0019; border-radius: 6px; padding: .5rem .75rem; font-size: 13px; margin-bottom: .75rem; }
+  #error-banner.show { display: flex; gap: .75rem; align-items: baseline; }
+  #error-banner .eb-msg { flex: 1; word-break: break-word; }
+  #error-banner .eb-close { background: none; border: 0; color: #8a0019; font-size: 15px; cursor: pointer; padding: 0; }
+
+  /* filter bar above the list */
+  .filters { display: flex; flex-direction: column; gap: .45rem; margin-bottom: .55rem; }
+  .filter-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: 12px; color: #555; }
+  .filter-row select, .filter-row input[type=number] { font: inherit; padding: .15rem .25rem; border: 1px solid #ccc; border-radius: 4px; }
+  .filter-row input[type=number] { width: 4.2em; }
+  .status-tabs { display: flex; gap: .25rem; flex-wrap: wrap; }
+  .status-tabs label { padding: .2rem .55rem; border: 1px solid #ddd; border-radius: 999px; cursor: pointer; font-size: 12px; color: #555; background: #fff; user-select: none; }
+  .status-tabs label:hover { border-color: #1a4ed8; color: #1a4ed8; }
+  .status-tabs input { display: none; }
+  .status-tabs label:has(input:checked) { background: #1a4ed8; border-color: #1a4ed8; color: #fff; }
+
+  .job-list { border: 1px solid #e3e3e3; border-radius: 6px; max-height: 78vh; overflow-y: auto; background: #fff; }
   .jl-empty { color: #999; padding: 1.5rem; text-align: center; }
   .job-row { padding: .55rem .75rem; border-bottom: 1px solid #eee; cursor: pointer; }
   .job-row:last-child { border-bottom: 0; }
@@ -30,6 +47,7 @@
   .jr-applied { color: #0a7d2e; } .jr-skipped { color: #b00020; }
   .jr-interview { color: #b07d00; } .jr-unread { color: #1a4ed8; }
   .jr-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .jr-doc { flex: 0 0 auto; font-size: 12px; }
   .jr-score { color: #0a7d2e; font-weight: 600; font-size: 12px; }
   .jr-meta { color: #666; font-size: 11px; margin-top: .15rem; padding-left: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -45,18 +63,175 @@
   .js-text { font-size: 13px; line-height: 1.55; color: #333; }
   .js-actions { display: flex; gap: .5rem; align-items: center; margin-top: 1.1rem; padding-top: .8rem; border-top: 1px solid #eee; }
   .js-status { color: #555; font-size: 12px; margin-right: auto; }
+
+  /* tailoring draft + bullet diff */
+  .draft-meta { display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; font-size: 11px; color: #666; margin: .2rem 0 .8rem; padding-bottom: .5rem; border-bottom: 1px solid #eee; }
+  .draft-meta b { color: #333; }
+  fieldset.draft-role { border: 0; padding: 0; margin: 0 0 1rem; }
+  .draft-role legend { font-weight: 600; font-size: 13px; padding: .4rem 0 .2rem; }
+  .draft-bullet { display: grid; grid-template-columns: 22px 1fr; gap: .5rem; padding: .5rem 0; border-bottom: 1px solid #f1f1f1; }
+  .draft-bullet.dropped .bullet-body { opacity: .5; }
+  .bullet-body { min-width: 0; }
+  .bullet-plain, .diff-line { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .diff-del { color: #b00020; text-decoration: line-through; }
+  .diff-add { color: #0a7d2e; }
+  .bullet-note { font-size: 11px; color: #888; margin-top: .15rem; }
+  .bullet-note.drop { color: #b07d00; }
+  .bullet-edit { margin-top: .3rem; }
+  .bullet-edit > summary { font-size: 11px; color: #1a4ed8; cursor: pointer; }
+  .bullet-edit textarea { width: 100%; margin-top: .3rem; font: inherit; padding: .4rem; border: 1px solid #ccc; border-radius: 4px; }
+  .draft-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: 1rem; padding-top: .8rem; border-top: 1px solid #eee; }
+  .draft-empty { border: 1.5px dashed #c9d4f0; border-radius: 8px; background: #fafbff; color: #555; padding: 2.2rem 1.5rem; text-align: center; }
+  .draft-empty p { margin: 0 0 .9rem; font-size: 13.5px; }
+  .draft-empty .draft-trigger { display: inline-block; margin: 0 0 .9rem; padding: .55rem 1.1rem; font-size: 14px; }
+  .draft-empty .htmx-indicator.htmx-request { display: block; margin-bottom: .6rem; }
+  .draft-hint { font-size: 12px; color: #8892a8; max-width: 46ch; margin: 0 auto; line-height: 1.5; }
+
+  /* markdown two-pane résumé workspace */
+  .md-panes { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; align-items: start; }
+  @media (max-width: 1100px) { .md-panes { grid-template-columns: 1fr; } }
+  .md-pane { min-width: 0; }
+  .md-pane-head { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #888; margin: 0 0 .3rem; }
+  .md-pane-head b { color: #555; }
+  textarea.resume-md { box-sizing: border-box; width: 100%; min-height: 60vh; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: .6rem; border: 1px solid #ccc; border-radius: 5px; resize: vertical; white-space: pre; overflow-x: auto; }
+  .md-diff-details { margin-top: .45rem; }
+  .md-diff-details > summary { cursor: pointer; font-size: 11px; color: #1a4ed8; user-select: none; }
+  .md-diff-details > summary:hover { text-decoration: underline; }
+  .md-diff-details[open] > summary { margin-bottom: .35rem; }
+  .md-diff { border: 1px solid #eee; border-radius: 5px; padding: .5rem .6rem; max-height: 60vh; overflow: auto; background: #fcfcfd; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .md-diff .diff-line { white-space: pre-wrap; word-break: break-word; padding: 0 .2rem; }
+  .md-diff .diff-ctx { color: #555; }
+  .md-diff .diff-add { color: #0a7d2e; background: #e6ffed; }
+  .md-diff .diff-del { color: #b00020; background: #ffeef0; text-decoration: none; }
+  .md-right-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .5rem; }
+  .md-spacer { flex: 1 1 auto; }
+  .tpl-select { font: inherit; padding: .25rem; border: 1px solid #ccc; border-radius: 4px; }
+  .generate-preview { color: #1a4ed8; font-size: 13px; }
+  .save-status { display: inline-flex; }
+  .generate-ok-inline { display: inline-flex; gap: .5rem; align-items: center; color: #0a7d2e; font-weight: 600; font-size: 12.5px; padding: .15rem .5rem; background: #f2fbf4; border: 1px solid #bfe6c9; border-radius: 4px; }
+
+  /* collapsible workspace sections (résumé / cover letter) */
+  details.ws-section { margin-top: 1rem; border-top: 1px solid #eee; padding-top: .55rem; }
+  details.ws-section > summary { cursor: pointer; font-weight: 600; font-size: 14px; color: #333; user-select: none; list-style-position: inside; }
+  details.ws-section > summary:hover { color: #1a4ed8; }
+  details.ws-section[open] > summary { margin-bottom: .5rem; }
+  .ws-loading { color: #999; font-size: 13px; padding: .75rem 0; }
+
+  /* cover letter editor */
+  .cl-meta { display: flex; flex-wrap: wrap; gap: .8rem; font-size: 11px; color: #666; margin: 0 0 .4rem; }
+  .cl-meta b { color: #333; }
+  textarea.cover-md { box-sizing: border-box; width: 100%; min-height: 38vh; font: 13.5px/1.6 system-ui, sans-serif; padding: .6rem .7rem; border: 1px solid #ccc; border-radius: 5px; resize: vertical; }
+  .cl-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .6rem; }
+  .cl-note { color: #0a7d2e; font-weight: 600; font-size: 12.5px; }
+
+  .htmx-indicator { display: none; color: #888; }
+  .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline; }
 </style>
 </head>
 <body>
   <h1>jobs</h1>
-  <div class="sub">Server-rendered list (slice 5). <b>Unread</b> = no apply/skip decision yet. Apply/Skip in the summary updates the row via an OOB swap.</div>
+  <div class="sub"><b>Unread</b> = no apply/skip decision yet · 📄 = résumé saved. Filters reload the list; default range is the last 2 weeks.</div>
+
+  <div id="error-banner" role="alert">
+    <span class="eb-msg"></span>
+    <button type="button" class="eb-close" onclick="this.parentElement.classList.remove('show')">✕</button>
+  </div>
+
   <div class="layout">
-    <div hx-get="/ui/jobs?profile=Slava" hx-trigger="load" hx-swap="innerHTML">
-      <div class="job-list"><div class="jl-empty">loading…</div></div>
+    <div class="list-col">
+      <form id="job-filters" class="filters"
+            hx-get="/ui/jobs" hx-target="#job-list-wrap" hx-swap="innerHTML"
+            hx-trigger="load, change">
+        <input type="hidden" name="profile" value="Slava">
+        <div class="status-tabs">
+          <label><input type="radio" name="status" value="" checked>All</label>
+          <label><input type="radio" name="status" value="inbox">Inbox</label>
+          <label><input type="radio" name="status" value="applied">Applied</label>
+          <label><input type="radio" name="status" value="interview">Interview</label>
+          <label><input type="radio" name="status" value="skipped">Skipped</label>
+        </div>
+        <div class="filter-row">
+          <label>since
+            <select name="days">
+              <option value="7">last 7 days</option>
+              <option value="14" selected>last 2 weeks</option>
+              <option value="30">last 30 days</option>
+              <option value="90">last 90 days</option>
+              <option value="0">all time</option>
+            </select>
+          </label>
+          <label>by
+            <select name="date_field">
+              <option value="eval" selected>eval date</option>
+              <option value="posted">posted date</option>
+            </select>
+          </label>
+          <label>min score <input type="number" name="min_score" value="6.9" step="0.1" min="0" max="10"></label>
+          <span class="htmx-indicator">loading…</span>
+        </div>
+      </form>
+      <div id="job-list-wrap">
+        <div class="job-list"><div class="jl-empty">loading…</div></div>
+      </div>
     </div>
     <div id="job-detail" class="job-detail">
       <div class="detail-empty">Pick a job on the left.</div>
     </div>
   </div>
+
+<script>
+  // htmx doesn't swap on non-2xx responses, so failures (DeepSeek down, bad
+  // form, timeouts) are invisible by default. Surface them in the banner.
+  (function () {
+    var banner = document.getElementById('error-banner');
+    var msg = banner.querySelector('.eb-msg');
+    function show(text) { msg.textContent = text; banner.classList.add('show'); }
+    document.body.addEventListener('htmx:responseError', function (e) {
+      var x = e.detail.xhr;
+      var body = (x.responseText || '').trim().slice(0, 300);
+      show('Request failed (' + x.status + '): ' + (body || x.statusText));
+    });
+    document.body.addEventListener('htmx:sendError', function () {
+      show('Network error — is the server running?');
+    });
+    document.body.addEventListener('htmx:timeout', function () {
+      show('Request timed out.');
+    });
+    // any successful swap clears a stale error
+    document.body.addEventListener('htmx:afterSwap', function () {
+      banner.classList.remove('show');
+    });
+    // The workspace form's only native submit is the Generate PDF button, so
+    // Enter in a text input (e.g. "New template name…") would implicitly
+    // trigger it. PDF generation should be an explicit click only.
+    document.body.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.target.matches('.draft-form input[type="text"]')) {
+        e.preventDefault();
+      }
+    });
+  })();
+
+  // Keep the two résumé panes (working copy + AI suggestions) scrolled together
+  // so you can compare them line-for-line. A capture-phase listener on document
+  // catches scroll (which doesn't bubble) and survives the htmx swaps that
+  // recreate the textareas, so there's nothing to re-bind.
+  (function () {
+    var syncing = false;
+    document.addEventListener('scroll', function (e) {
+      var t = e.target;
+      if (syncing || !t.classList || !t.classList.contains('resume-md')) return;
+      var name = t.getAttribute('name');
+      var otherName = name === 'markdown' ? 'tailored' : name === 'tailored' ? 'markdown' : null;
+      if (!otherName) return;
+      var other = document.querySelector('textarea[name="' + otherName + '"]');
+      if (!other) return;
+      syncing = true;
+      // Proportional so unequal-length documents still track top-to-bottom.
+      var denom = Math.max(1, t.scrollHeight - t.clientHeight);
+      other.scrollTop = (t.scrollTop / denom) * Math.max(0, other.scrollHeight - other.clientHeight);
+      requestAnimationFrame(function () { syncing = false; });
+    }, true);
+  })();
+</script>
 </body>
 </html>

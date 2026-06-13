@@ -16,7 +16,14 @@ const systemPrompt = `You help tailor a resume to a specific job posting.
 
 The bullets below are the candidate's full resume. Do two things:
 1. REMOVALS — list bullets that should be removed for this job (clearly off-topic or redundant). Every bullet you do not list is kept by default. Be conservative.
-2. REWRITES — for bullets worth keeping that would land harder if reworded for THIS job, give an improved version. Keep the real achievement and any genuine metrics; never invent facts or numbers. Only rewrite when it clearly helps — most bullets need none.
+2. REWRITES — for bullets worth keeping that would land harder if reworded for THIS job, give an improved version. Write it as a tight resume bullet, NOT a sentence: start with a strong past-tense action verb, no first person ("I"/"my"), no filler, ideally one line and under ~20 words. Keep the real achievement and any genuine metrics; never invent facts or numbers.
+
+Judging relevance:
+- Judge each bullet by the transferable competency it demonstrates, not its surface domain. A bullet about building data products for marketing campaigns is evidence of end-to-end product ownership, not "marketing experience".
+- Awards, recognition, and honors are keep-by-default: they signal credibility regardless of topic. Remove one only if space-critical and clearly weaker than everything kept.
+- Prune oldest and most junior roles the hardest — recent senior work earns its space; decade-old analyst tasks rarely do. Be consistent: if you cut weak bullets from one early role, cut comparable bullets from the others.
+
+When the job's tech stack differs from the candidate's (e.g. the posting wants GCP and the resume shows AWS), prefer REWRITES that foreground the transferable concept — streaming, warehousing, orchestration, scale — and any genuinely shared tools. Never swap in technology the candidate has not actually used.
 
 Do not both remove and rewrite the same bullet. You return ONLY valid JSON in the exact schema specified by the user. No prose, no markdown, no commentary.`
 
@@ -73,8 +80,8 @@ Return ONLY this JSON:
 }
 
 Rules:
-- removals: list ONLY bullets to remove. Every omitted bullet is kept. When in doubt, keep it.
-- rewrites: only bullets that read clearly better reworded for this job. Preserve the real achievement and any genuine metrics; invent nothing. Most bullets should be omitted (kept as-is).
+- removals: list ONLY bullets to remove. Every omitted bullet is kept. When in doubt, keep it. Awards/recognition are keep-by-default. Judge by transferable competency, not surface domain. Prune the oldest/most junior roles hardest, and consistently.
+- rewrites: only bullets that read clearly better reworded for this job. Each new_text is a concise resume bullet — action-verb first, no first person, no trailing prose, under ~20 words. Preserve the real achievement and any genuine metrics; invent nothing — never claim tools the candidate has not used. When the posting's stack differs from the candidate's, reword kept bullets to lead with the transferable concept (streaming, modeling, orchestration, scale) and shared tools.
 - Never both remove and rewrite the same bullet.
 - "reason" must be one short sentence (under 25 words).
 - If nothing applies, return empty arrays: {"removals": [], "rewrites": []}.

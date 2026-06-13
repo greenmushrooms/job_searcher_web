@@ -1,0 +1,53 @@
+{{- /* Cover-letter pane, swapped into #job-cover inside the workspace's
+       collapsible "Cover letter" section. Empty state offers the AI draft
+       trigger; once a letter exists (saved or just drafted) it's an editable
+       textarea. An AI draft is NOT auto-saved — Save persists the textarea. */ -}}
+<div class="cover-letter">
+  <form class="cover-form" hx-target="#job-cover" hx-swap="innerHTML">
+    <input type="hidden" name="profile" value="{{ .Profile }}">
+
+    {{- if not .HasLetter }}
+    <div class="draft-empty">
+      <p>No cover letter for this job yet.</p>
+      <button type="button" class="draft-trigger"
+              hx-post="/ui/jobs/{{ .JobID }}/cover-letter/draft"
+              hx-include="closest form"
+              hx-indicator="#cover-spinner"
+              hx-disabled-elt="this">
+        ✨ Start cover letter with AI
+      </button>
+      <span id="cover-spinner" class="htmx-indicator">writing against the job description…</span>
+      <div class="draft-hint">DeepSeek writes a first draft grounded in the résumé saved for this job (or the full résumé if none is saved yet) — review and edit before sending. Personal bits it can't know land as [placeholders].</div>
+    </div>
+    {{- else }}
+    {{- if or .UpdatedAt .Model }}
+    <div class="cl-meta">
+      {{- if .Model }}<span class="meta-item"><b>model</b> {{ .Model }}</span>{{ end }}
+      {{- if .UpdatedAt }}<span class="meta-item"><b>saved</b> {{ .UpdatedAt }}</span>{{ end }}
+    </div>
+    {{- end }}
+    <textarea name="body" class="cover-md" rows="18" spellcheck="true">{{ .Body }}</textarea>
+    <div class="cl-actions">
+      <button type="button" class="draft-finalize"
+              hx-post="/ui/jobs/{{ .JobID }}/cover-letter"
+              hx-include="closest form">💾 Save letter</button>
+      {{- /* Native submit (not htmx): saves then downloads the rendered PDF.
+             A download (not inline) so it works even when the browser's PDF
+             viewer blanks. */}}
+      <button type="submit" class="alt"
+              formaction="/ui/jobs/{{ .JobID }}/cover-letter.pdf"
+              formmethod="post" formtarget="_blank">📄 Save as PDF</button>
+      <button type="button" class="small"
+              onclick="navigator.clipboard.writeText(this.closest('form').querySelector('textarea').value).then(() => { this.textContent = 'copied ✓'; setTimeout(() => this.textContent = '📋 Copy', 1500); })">📋 Copy</button>
+      <button type="button" class="small secondary"
+              hx-post="/ui/jobs/{{ .JobID }}/cover-letter/draft"
+              hx-include="closest form"
+              hx-confirm="Re-draft with AI? This replaces the text below (unsaved edits are lost)."
+              hx-indicator="#cover-spinner"
+              hx-disabled-elt="this">↻ re-draft with AI</button>
+      <span id="cover-spinner" class="htmx-indicator">writing…</span>
+      {{- if .Note }}<span class="cl-note">{{ .Note }}</span>{{ end }}
+    </div>
+    {{- end }}
+  </form>
+</div>

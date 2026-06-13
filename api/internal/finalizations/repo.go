@@ -27,7 +27,10 @@ type Finalization struct {
 	// accepted AI rewrites. The PDF renderer reads this rather than re-deriving
 	// from canonical.
 	Bullets     json.RawMessage `json:"bullets"`
-	GeneratedAt string          `json:"generated_at"`
+	// Markdown is the finalized resume as a free-form markdown document — the
+	// source of truth the PDF is rendered from in the markdown-centric flow.
+	Markdown    string `json:"markdown"`
+	GeneratedAt string `json:"generated_at"`
 }
 
 // SaveInput is the per-job tailored-resume write. Removals and Bullets are
@@ -40,6 +43,7 @@ type SaveInput struct {
 	KeptBulletIDs []string
 	Removals      []byte
 	Bullets       []byte
+	Markdown      string
 }
 
 type Repo struct {
@@ -74,18 +78,19 @@ func (r *Repo) Save(ctx context.Context, in SaveInput) (*Finalization, error) {
 	var f Finalization
 	err := r.q.QueryRow(ctx, `
         INSERT INTO web.jobs_resume
-            (job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, generated_at)
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, NOW())
+            (job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, markdown, generated_at)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, NOW())
         ON CONFLICT (job_id, sys_profile) DO UPDATE
         SET resume_version  = EXCLUDED.resume_version,
             template_id     = EXCLUDED.template_id,
             kept_bullet_ids = EXCLUDED.kept_bullet_ids,
             removals        = EXCLUDED.removals,
             bullets         = EXCLUDED.bullets,
+            markdown        = EXCLUDED.markdown,
             generated_at    = NOW()
-        RETURNING job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, generated_at::text
-    `, in.JobID, in.SysProfile, in.ResumeVersion, templateID, keptIDs, string(removals), string(bullets)).Scan(
-		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.TemplateID, &f.KeptBulletIDs, &f.Removals, &f.Bullets, &f.GeneratedAt,
+        RETURNING job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, COALESCE(markdown, ''), generated_at::text
+    `, in.JobID, in.SysProfile, in.ResumeVersion, templateID, keptIDs, string(removals), string(bullets), in.Markdown).Scan(
+		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.TemplateID, &f.KeptBulletIDs, &f.Removals, &f.Bullets, &f.Markdown, &f.GeneratedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert jobs_resume: %w", err)
@@ -110,11 +115,11 @@ func (r *Repo) Save(ctx context.Context, in SaveInput) (*Finalization, error) {
 func (r *Repo) Get(ctx context.Context, jobID, sysProfile string) (*Finalization, error) {
 	var f Finalization
 	err := r.q.QueryRow(ctx, `
-        SELECT job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, generated_at::text
+        SELECT job_id, sys_profile, resume_version, template_id, kept_bullet_ids, removals, bullets, COALESCE(markdown, ''), generated_at::text
         FROM web.jobs_resume
         WHERE job_id = $1 AND sys_profile = $2
     `, jobID, sysProfile).Scan(
-		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.TemplateID, &f.KeptBulletIDs, &f.Removals, &f.Bullets, &f.GeneratedAt,
+		&f.JobID, &f.SysProfile, &f.ResumeVersion, &f.TemplateID, &f.KeptBulletIDs, &f.Removals, &f.Bullets, &f.Markdown, &f.GeneratedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

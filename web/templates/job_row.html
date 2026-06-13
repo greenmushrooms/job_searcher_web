@@ -12,6 +12,7 @@
       {{- if eq .Status "applied" }}✓{{ else if eq .Status "skipped" }}✗{{ else if eq .Status "interview" }}★{{ else }}•{{ end -}}
     </span>
     <span class="jr-title">{{ .Title }}</span>
+    {{- if .HasResume }}<span class="jr-doc" title="résumé saved">📄</span>{{ end }}
     <span class="jr-score">{{ .Score }}</span>
   </div>
   <div class="jr-meta">

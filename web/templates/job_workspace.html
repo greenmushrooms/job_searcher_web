@@ -1,12 +1,27 @@
-{{- /* Per-job right pane: summary (re-renders on apply/skip) on top, the
-       template dropdown, then the tailoring draft lazy-loaded into #job-draft.
-       Loaded into #job-detail when a job row is clicked. */ -}}
+{{- /* Per-job right pane: summary (re-renders on apply/skip) on top, then two
+       collapsible sections — the résumé workspace (template dropdown + the
+       tailoring draft lazy-loaded into #job-draft) and the cover letter
+       (lazy-loaded into #job-cover). Loaded into #job-detail when a job row
+       is clicked. */ -}}
 <div class="workspace" id="workspace-{{ .JobID }}">
   {{ template "job_summary" .Summary }}
-  {{ template "resume_controls" .Controls }}
-  <div class="draft-panel" id="job-draft"
-       hx-get="/ui/jobs/{{ .JobID }}/draft?profile={{ .Profile }}&template={{ .Controls.TemplateID }}"
-       hx-trigger="load" hx-swap="innerHTML">
-    <div class="ws-loading">loading tailoring…</div>
-  </div>
+
+  <details class="ws-section" open>
+    <summary>📄 Résumé</summary>
+    {{ template "resume_controls" .Controls }}
+    <div class="draft-panel" id="job-draft"
+         hx-get="/ui/jobs/{{ .JobID }}/draft?profile={{ .Profile }}&template={{ .Controls.TemplateID }}"
+         hx-trigger="load" hx-swap="innerHTML">
+      <div class="ws-loading">loading tailoring…</div>
+    </div>
+  </details>
+
+  <details class="ws-section">
+    <summary>✉️ Cover letter</summary>
+    <div class="cover-panel" id="job-cover"
+         hx-get="/ui/jobs/{{ .JobID }}/cover-letter?profile={{ .Profile }}"
+         hx-trigger="load" hx-swap="innerHTML">
+      <div class="ws-loading">loading…</div>
+    </div>
+  </details>
 </div>

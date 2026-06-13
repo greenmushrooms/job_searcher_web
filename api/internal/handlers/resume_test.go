@@ -1,8 +1,7 @@
 package handlers
 
 import (
-	"net/http"
-	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
@@ -53,126 +52,56 @@ func TestEffectiveRemovals(t *testing.T) {
 	})
 }
 
-func TestBuildDraftView(t *testing.T) {
-	res := &resume.Resume{
-		Version: "v2-abcd1234",
-		Bullets: []resume.Bullet{
-			{RoleID: "r1", RoleTitle: "Eng", RoleCompany: "Acme", RoleDates: "2020", BulletID: "b1", Text: "kept one"},
-			{RoleID: "r1", RoleTitle: "Eng", RoleCompany: "Acme", RoleDates: "2020", BulletID: "b2", Text: "dropped one"},
-			{RoleID: "r2", RoleTitle: "Dev", RoleCompany: "Globex", RoleDates: "2018", BulletID: "b9", Text: "kept two"},
-		},
+func TestTailoredBullets(t *testing.T) {
+	base := []resume.Bullet{
+		{RoleID: "r1", BulletID: "b1", Text: "keep me"},
+		{RoleID: "r1", BulletID: "b2", Text: "rewrite me"},
+		{RoleID: "r1", BulletID: "b3", Text: "drop me"},
+		{RoleID: "r2", BulletID: "b9", Text: "second role"},
 	}
-	p := &draftedEventPayload{
-		Model:         "deepseek-v4-pro",
-		ResumeVersion: res.Version,
-		CostUSD:       0.01,
-		Removals: []deepseek.Removal{
-			{RoleID: "r1", BulletID: "b2", Reason: "redundant"},
-			// Points at a bullet no longer present — must be ignored, not crash.
-			{RoleID: "rX", BulletID: "bX", Reason: "stale"},
-		},
+	removed := map[string]string{"r1.b3": "off-topic"}
+	rewritten := map[string]deepseek.Rewrite{
+		"r1.b2": {RoleID: "r1", BulletID: "b2", NewText: "rewritten text"},
+		// Points at a removed bullet — applied or not, the bullet is gone anyway.
+		"r1.b3": {RoleID: "r1", BulletID: "b3", NewText: "irrelevant"},
 	}
 
-	view := buildDraftView("job-1", "Slava", "just now", p, res)
+	got := tailoredBullets(base, removed, rewritten)
 
-	if view.TotalCount != 3 {
-		t.Errorf("TotalCount: got %d, want 3", view.TotalCount)
-	}
-	if view.KeptCount != 2 {
-		t.Errorf("KeptCount: got %d, want 2", view.KeptCount)
-	}
-	if len(view.Roles) != 2 {
-		t.Fatalf("Roles: got %d, want 2 (grouped by role)", len(view.Roles))
-	}
-	// Role order follows bullet order in the resume.
-	if view.Roles[0].RoleID != "r1" || view.Roles[1].RoleID != "r2" {
-		t.Errorf("role order: got %s,%s want r1,r2", view.Roles[0].RoleID, view.Roles[1].RoleID)
-	}
-
-	// b2 is the only removal that matches a live bullet.
-	var b2 *draftBulletView
-	for i := range view.Roles[0].Bullets {
-		if view.Roles[0].Bullets[i].CompositeID == "r1.b2" {
-			b2 = &view.Roles[0].Bullets[i]
-		}
-	}
-	if b2 == nil {
-		t.Fatal("r1.b2 not found in view")
-	}
-	if b2.Keep {
-		t.Error("r1.b2 should be unchecked (Keep=false)")
-	}
-	if b2.Reason != "redundant" {
-		t.Errorf("r1.b2 reason: got %q, want %q", b2.Reason, "redundant")
-	}
-}
-
-func TestBuildDraftView_Rewrites(t *testing.T) {
-	res := &resume.Resume{
-		Bullets: []resume.Bullet{
-			{RoleID: "r1", BulletID: "b1", Text: "original one"},
-			{RoleID: "r1", BulletID: "b2", Text: "drop me"},
-		},
-	}
-	p := &draftedEventPayload{
-		Rewrites: []deepseek.Rewrite{
-			{RoleID: "r1", BulletID: "b1", NewText: "punchier one", Reason: "matches stack"},
-			// Rewrite on a removed bullet must be ignored.
-			{RoleID: "r1", BulletID: "b2", NewText: "won't show", Reason: "x"},
-		},
-		Removals: []deepseek.Removal{{RoleID: "r1", BulletID: "b2", Reason: "off-topic"}},
-	}
-
-	view := buildDraftView("job", "Slava", "now", p, res)
-
-	if view.RewriteCount != 1 {
-		t.Errorf("RewriteCount: got %d, want 1 (removed bullet's rewrite ignored)", view.RewriteCount)
-	}
-	b1 := view.Roles[0].Bullets[0]
-	if b1.NewText != "punchier one" || b1.RewriteReason != "matches stack" {
-		t.Errorf("b1 rewrite: got %q/%q", b1.NewText, b1.RewriteReason)
-	}
-	b2 := view.Roles[0].Bullets[1]
-	if b2.NewText != "" {
-		t.Errorf("b2 (removed) should carry no rewrite, got %q", b2.NewText)
-	}
-}
-
-func TestBuildFinalBullets(t *testing.T) {
-	res := &resume.Resume{
-		Bullets: []resume.Bullet{
-			{RoleID: "r1", BulletID: "b1", Text: "canonical one"},
-			{RoleID: "r1", BulletID: "b2", Text: "canonical two"},
-			{RoleID: "r2", BulletID: "b9", Text: "canonical nine"},
-		},
-	}
-	rewrites := map[string]string{"r1.b2": "ai two"}
-	form := url.Values{
-		"text_r1.b1": {"canonical one"}, // unchanged -> canonical
-		"text_r1.b2": {"ai two"},        // matches rewrite -> ai
-		"text_r2.b9": {"hand edited"},   // -> manual
-	}
-	r := &http.Request{Form: form}
-	kept := []string{"r1.b1", "r1.b2", "r2.b9", "bad-no-dot"}
-
-	got := buildFinalBullets(kept, r, res, rewrites)
 	if len(got) != 3 {
-		t.Fatalf("got %d bullets, want 3 (bad id skipped): %+v", len(got), got)
+		t.Fatalf("got %d bullets, want 3 (one dropped): %+v", len(got), got)
 	}
-	want := map[string]string{"r1.b1": "canonical", "r1.b2": "ai", "r2.b9": "manual"}
-	for _, fb := range got {
-		cid := fb.RoleID + "." + fb.BulletID
-		if want[cid] != fb.Source {
-			t.Errorf("%s: source got %q, want %q (text=%q)", cid, fb.Source, want[cid], fb.Text)
-		}
+	// Order preserved, b3 dropped, b2 rewritten.
+	if got[0].BulletID != "b1" || got[1].BulletID != "b2" || got[2].BulletID != "b9" {
+		t.Errorf("order/selection wrong: %+v", got)
+	}
+	if got[1].Text != "rewritten text" {
+		t.Errorf("b2 not rewritten: %q", got[1].Text)
 	}
 }
 
-func TestBuildFinalBullets_EmptyFallsBackToCanonical(t *testing.T) {
-	res := &resume.Resume{Bullets: []resume.Bullet{{RoleID: "r1", BulletID: "b1", Text: "canonical one"}}}
-	r := &http.Request{Form: url.Values{"text_r1.b1": {"   "}}} // blank -> canonical fallback
-	got := buildFinalBullets([]string{"r1.b1"}, r, res, nil)
-	if len(got) != 1 || got[0].Text != "canonical one" || got[0].Source != "canonical" {
-		t.Errorf("blank should fall back to canonical, got %+v", got)
+func TestDiffMarkdownHTML(t *testing.T) {
+	base := "# Resume\n\n- alpha\n- beta\n"
+	tailored := "# Resume\n\n- alpha\n- BETA improved\n"
+
+	html := string(diffMarkdownHTML(base, tailored))
+
+	if !strings.Contains(html, "diff-del") || !strings.Contains(html, "beta") {
+		t.Errorf("expected a deletion line for 'beta':\n%s", html)
+	}
+	if !strings.Contains(html, "diff-add") || !strings.Contains(html, "BETA improved") {
+		t.Errorf("expected an addition line for 'BETA improved':\n%s", html)
+	}
+	if !strings.Contains(html, "diff-ctx") {
+		t.Errorf("expected context lines for the unchanged header:\n%s", html)
+	}
+}
+
+func TestNameFromMarkdown(t *testing.T) {
+	if got := nameFromMarkdown("# Jane Doe\njane@example.com\n"); got != "Jane Doe" {
+		t.Errorf("got %q, want %q", got, "Jane Doe")
+	}
+	if got := nameFromMarkdown("no heading here\n"); got != "resume" {
+		t.Errorf("got %q, want fallback 'resume'", got)
 	}
 }

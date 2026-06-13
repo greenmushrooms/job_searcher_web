@@ -47,7 +47,7 @@ PGPASSWORD=$(grep DB_PASSWORD ../job_searcher_2/.env | cut -d= -f2) \
 cd api
 cp ../.env.example .env   # then fill in DB_* values
 go run ./cmd/server
-# API on :8090, htmx UI on http://localhost:8090/
+# API on :7770, htmx UI on http://localhost:7770/
 ```
 
 ## Migration history
@@ -64,6 +64,7 @@ cd api && go run ./cmd/seed-resume          # profile=Slava, file from RESUME_JS
 ```
 - `006_jobs_resume.sql` — renames `web.resume_finalizations` → `web.jobs_resume` (the per-job tailored resume), adds a `removals` snapshot + `generated_at`, and widens the `application_events` event-type CHECK to allow `resume_generated`.
 - `007_job_review.sql` — renames `web.applications` → `web.job_review` (per-job review state: applied/skipped/interview). "Unread" in the UI = no row here yet.
+- `011_cover_letter.sql` — adds `web.jobs_cover_letter` (per-job AI-drafted, hand-edited cover letter) and widens the event-type CHECK to allow `cover_letter_drafted` / `cover_letter_saved`.
 
 Apply any later migration with the generic runner (no `psql` needed):
 

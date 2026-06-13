@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strings"
 
@@ -12,18 +13,22 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/finalizations"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resumemaster"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
 type ResumeHandler struct {
 	Jobs          *jobs.Repo
 	Finalizations *finalizations.Repo
+	CoverLetters  *coverletters.Repo
+	Master        *resumemaster.Repo // permanent master résumé markdown (diff lab)
 	Resumes       *resume.Repo     // writes to the canonical resume (left editor)
 	Templates     *templates.Repo  // reusable resume variants
 	DeepSeek      *deepseek.Client // may be nil if not configured
@@ -174,134 +179,84 @@ type generateResultView struct {
 	JobID         string
 	Profile       string
 	TemplateID    string
-	KeptCount     int
 	ResumeVersion string
 	GeneratedAt   string
+	Status        string      // current review status — hides the "Mark as applied" nudge once applied
+	Row           *jobRowView // OOB list-row refresh so the 📄 badge shows up immediately
 }
 
-// finalBullet is one bullet in the generated resume's stored snapshot. source
-// records where the final text came from so the row self-describes its
-// tailoring: canonical (unchanged), manual (user-edited), or ai (accepted
-// rewrite).
-type finalBullet struct {
-	RoleID   string `json:"role_id"`
-	BulletID string `json:"bullet_id"`
-	Text     string `json:"text"`
-	Source   string `json:"source"`
-}
-
-// GenerateResume handles POST /ui/jobs/{id}/generate — the right-hand "Generate"
-// button. The checkbox form posts the kept bullet IDs (standard form encoding,
-// repeated kept_bullet_ids); we snapshot the LLM removals, upsert jobs_resume,
-// and swap in a confirmation fragment. PDF rendering arrives in a later slice.
-func (h *ResumeHandler) GenerateResume(w http.ResponseWriter, r *http.Request) {
-	jobID := chi.URLParam(r, "id")
+// saveResumeFromForm persists the working-copy markdown from the two-pane
+// form to jobs_resume, snapshotting the LLM removals for audit. Shared by
+// GenerateResume (htmx confirmation) and GeneratePDF (save + stream PDF).
+func (h *ResumeHandler) saveResumeFromForm(r *http.Request, jobID string) (*finalizations.Finalization, string, string, *handlerErr) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
-		return
+		return nil, "", "", &handlerErr{http.StatusBadRequest, "bad form"}
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 	templateID := templateOrDefault(r.FormValue("template"))
-	kept := r.Form["kept_bullet_ids"]
-	if kept == nil {
-		kept = []string{}
+	markdown := r.FormValue("markdown")
+	if strings.TrimSpace(markdown) == "" {
+		return nil, profile, templateID, &handlerErr{http.StatusBadRequest, "empty resume markdown"}
 	}
 
-	res, err := resume.LoadTemplate(r.Context(), h.Pool, profile, templateID)
-	if err != nil {
-		http.Error(w, "resume load: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
 	resumeVersion := r.FormValue("resume_version")
 	if resumeVersion == "" {
-		resumeVersion = res.Version
+		if res, err := resume.LoadTemplate(r.Context(), h.Pool, profile, templateID); err == nil {
+			resumeVersion = res.Version
+		}
 	}
 
 	exists, err := h.jobExists(r.Context(), jobID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, profile, templateID, &handlerErr{http.StatusInternalServerError, err.Error()}
 	}
 	if !exists {
-		http.Error(w, "job not found", http.StatusNotFound)
-		return
+		return nil, profile, templateID, &handlerErr{http.StatusNotFound, "job not found"}
 	}
 
-	bullets := buildFinalBullets(kept, r, res, h.latestRewrites(r.Context(), jobID, profile))
-	bulletsJSON, _ := json.Marshal(bullets)
 	removals := h.latestRemovalsJSON(r.Context(), jobID, profile)
-
 	saved, err := h.Finalizations.Save(r.Context(), finalizations.SaveInput{
 		JobID:         jobID,
 		SysProfile:    profile,
 		ResumeVersion: resumeVersion,
 		TemplateID:    templateID,
-		KeptBulletIDs: kept,
 		Removals:      removals,
-		Bullets:       bulletsJSON,
+		Markdown:      markdown,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return nil, profile, templateID, &handlerErr{http.StatusInternalServerError, err.Error()}
+	}
+	return saved, profile, templateID, nil
+}
+
+// GenerateResume handles POST /ui/jobs/{id}/generate — the "Save résumé"
+// button. The two-pane form posts the (possibly hand-edited) resume markdown
+// from the left textarea; we persist it to jobs_resume and swap in a
+// confirmation fragment with a Preview PDF link.
+func (h *ResumeHandler) GenerateResume(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	saved, profile, templateID, herr := h.saveResumeFromForm(r, jobID)
+	if herr != nil {
+		http.Error(w, herr.msg, herr.status)
 		return
 	}
-	h.Renderer.HTML(w, http.StatusOK, "generate_result", generateResultView{
+	view := generateResultView{
 		JobID:         jobID,
 		Profile:       profile,
 		TemplateID:    templateID,
-		KeptCount:     len(saved.KeptBulletIDs),
 		ResumeVersion: saved.ResumeVersion,
 		GeneratedAt:   saved.GeneratedAt,
-	})
-}
-
-// buildFinalBullets assembles the per-bullet snapshot for the kept selection,
-// reading each bullet's final text from the form (text_<composite>) and
-// tagging its source by comparing against the canonical pool text and the
-// latest AI rewrite.
-func buildFinalBullets(kept []string, r *http.Request, res *resume.Resume, rewrites map[string]string) []finalBullet {
-	canon := make(map[string]string, len(res.Bullets))
-	for _, b := range res.Bullets {
-		canon[b.CompositeID()] = b.Text
 	}
-	out := make([]finalBullet, 0, len(kept))
-	for _, cid := range kept {
-		dot := strings.IndexByte(cid, '.')
-		if dot < 0 {
-			continue
-		}
-		text := r.FormValue("text_" + cid)
-		if strings.TrimSpace(text) == "" {
-			text = canon[cid]
-		}
-		source := "manual"
-		switch {
-		case text == canon[cid]:
-			source = "canonical"
-		case rewrites[cid] != "" && text == rewrites[cid]:
-			source = "ai"
-		}
-		out = append(out, finalBullet{
-			RoleID:   cid[:dot],
-			BulletID: cid[dot+1:],
-			Text:     text,
-			Source:   source,
-		})
+	// Refresh the list row out-of-band so the 📄 badge appears without a
+	// list reload; best-effort, the save already succeeded.
+	if j, err := h.Jobs.Get(r.Context(), jobID); err == nil && j != nil {
+		row := toRowView(*j, profile)
+		row.HasResume = true // the row we just upserted
+		row.OOB = true
+		view.Row = &row
+		view.Status = row.Status
 	}
-	return out
-}
-
-// latestRewrites returns composite-ID -> new text from the most recent draft
-// event, used to tag accepted AI rewrites at generate time.
-func (h *ResumeHandler) latestRewrites(ctx context.Context, jobID, profile string) map[string]string {
-	payload, _, err := h.latestDraftEvent(ctx, jobID, profile)
-	if err != nil || payload == nil {
-		return nil
-	}
-	m := make(map[string]string, len(payload.Rewrites))
-	for _, rw := range payload.Rewrites {
-		m[rw.RoleID+"."+rw.BulletID] = rw.NewText
-	}
-	return m
+	h.Renderer.HTML(w, http.StatusOK, "generate_result", view)
 }
 
 // templateOrDefault maps an empty template param to the virtual Default.
@@ -373,9 +328,8 @@ type templateSavedView struct {
 }
 
 // SaveTemplate handles POST /ui/jobs/{id}/save-template — snapshot the current
-// kept selection + edited text into a new reusable template. An override is
-// stored only where the final text differs from the canonical bullet, so the
-// template stays linked to canonical for unchanged bullets.
+// left-pane markdown into a new reusable template. In the markdown-centric flow
+// a template is a free-form resume document, not a structured bullet selection.
 func (h *ResumeHandler) SaveTemplate(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
@@ -388,51 +342,66 @@ func (h *ResumeHandler) SaveTemplate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "template name required", http.StatusBadRequest)
 		return
 	}
-	kept := r.Form["kept_bullet_ids"]
-
-	canonRes, err := resume.LoadProfile(r.Context(), h.Pool, profile)
-	if err != nil {
-		http.Error(w, "resume load: "+err.Error(), http.StatusInternalServerError)
+	markdown := r.FormValue("markdown")
+	if strings.TrimSpace(markdown) == "" {
+		http.Error(w, "empty resume markdown", http.StatusBadRequest)
 		return
 	}
-	canon := make(map[string]string, len(canonRes.Bullets))
-	for _, b := range canonRes.Bullets {
-		canon[b.CompositeID()] = b.Text
-	}
 
-	var bullets []templates.Bullet
-	for i, cid := range kept {
-		dot := strings.IndexByte(cid, '.')
-		if dot < 0 {
-			continue
-		}
-		text := r.FormValue("text_" + cid)
-		if strings.TrimSpace(text) == "" {
-			text = canon[cid]
-		}
-		var override *string
-		if text != canon[cid] {
-			t := text
-			override = &t
-		}
-		bullets = append(bullets, templates.Bullet{
-			RoleID:       cid[:dot],
-			BulletID:     cid[dot+1:],
-			OverrideText: override,
-			SortOrder:    i,
-		})
-	}
-
-	id, err := h.Templates.Save(r.Context(), profile, name, bullets)
+	id, err := h.Templates.SaveMarkdown(r.Context(), profile, name, markdown)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_, _ = h.Pool.Exec(r.Context(), `
+	h.templateSavedEvent(r.Context(), profile, jobID, id, name)
+
+	h.renderTemplateSaved(w, r, jobID, profile, id, name)
+}
+
+// ReplaceTemplate handles POST /ui/jobs/{id}/replace-template — overwrite an
+// existing template's markdown with the current left-pane markdown. The target
+// template id comes from the actions-row dropdown (form field target_template).
+func (h *ResumeHandler) ReplaceTemplate(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
+	id := r.FormValue("target_template")
+	if id == "" || id == resume.DefaultTemplateID {
+		http.Error(w, "choose a template to replace", http.StatusBadRequest)
+		return
+	}
+	markdown := r.FormValue("markdown")
+	if strings.TrimSpace(markdown) == "" {
+		http.Error(w, "empty resume markdown", http.StatusBadRequest)
+		return
+	}
+	if err := h.Templates.ReplaceMarkdown(r.Context(), profile, id, markdown); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := id
+	if list, err := h.Templates.List(r.Context(), profile); err == nil {
+		for _, t := range list {
+			if t.ID == id {
+				name = t.Name
+			}
+		}
+	}
+	h.templateSavedEvent(r.Context(), profile, jobID, id, name)
+	h.renderTemplateSaved(w, r, jobID, profile, id, name)
+}
+
+func (h *ResumeHandler) templateSavedEvent(ctx context.Context, profile, jobID, id, name string) {
+	_, _ = h.Pool.Exec(ctx, `
         INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
         VALUES ($1, $2, 'resume_template_saved', $3::jsonb)
-    `, profile, jobID, fmt.Sprintf(`{"template_id":%q,"name":%q,"bullet_count":%d}`, id, name, len(bullets)))
+    `, profile, jobID, fmt.Sprintf(`{"template_id":%q,"name":%q}`, id, name))
+}
 
+func (h *ResumeHandler) renderTemplateSaved(w http.ResponseWriter, r *http.Request, jobID, profile, id, name string) {
 	controls, err := resumeControls(r.Context(), h.Templates, jobID, profile, id, true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -525,46 +494,121 @@ func (h *ResumeHandler) templateMutation(w http.ResponseWriter, r *http.Request,
 // ── HTML fragment routes ────────────────────────────────────────────────────
 
 // draftFragmentView is the data shape consumed by web/templates/draft_fragment.html.
+// The left pane is the editable working-copy markdown (BaseMarkdown); the right
+// pane is an editable copy of the AI-tailored markdown (TailoredMarkdown). Each
+// pane shows a highlighted diff vs the canonical render below it.
 type draftFragmentView struct {
-	JobID         string
-	Profile       string
-	TemplateID    string
-	NoDraft       bool
-	Model         string
-	ResumeVersion string
-	DraftedAt     string
-	CostUSD       float64
-	KeptCount     int
-	RewriteCount  int
-	TotalCount    int
-	Roles         []draftRoleView
+	JobID            string
+	Profile          string
+	TemplateID       string
+	TemplateName     string // display name for the selected template
+	NoDraft          bool          // no AI draft yet → right pane shows the trigger
+	BaseMarkdown     string        // left textarea content
+	BaseDiffHTML     template.HTML // left pane: canonical → working-copy diff (empty if identical)
+	DiffHTML         template.HTML // right pane: canonical → tailored diff
+	TailoredMarkdown string        // payload for "Apply AI suggestions"
+	HasSaved         bool          // a generated resume exists → show Preview PDF
+	Model            string
+	ResumeVersion    string
+	DraftedAt        string
+	CostUSD          float64
+	RemovedCount     int
+	RewriteCount     int
+	TotalCount       int
+	ReplaceTargets   []templateOpt // stored templates for the "Replace" dropdown
 }
 
-type draftRoleView struct {
-	RoleID      string
-	RoleTitle   string
-	RoleCompany string
-	RoleDates   string
-	Bullets     []draftBulletView
+// markdownFragment assembles the two-pane view. The right pane is an editable
+// copy of the AI-tailored markdown; tailoredOverride, when set, replaces the
+// freshly-computed tailored text with the user's hand-edited version (so their
+// edits survive a re-render and the diff reflects them). The diff is always
+// canonical-vs-(tailored or override). The left-pane base follows the
+// precedence: explicit override (Apply AI) → saved job markdown → selected
+// template markdown → canonical render.
+func (h *ResumeHandler) markdownFragment(ctx context.Context, jobID, profile, templateID, baseOverride, tailoredOverride string, payload *draftedEventPayload, draftedAt string) (draftFragmentView, *handlerErr) {
+	res, err := resume.LoadTemplate(ctx, h.Pool, profile, templateID)
+	if err != nil {
+		return draftFragmentView{}, &handlerErr{http.StatusInternalServerError, "resume load: " + err.Error()}
+	}
+	doc, err := resume.LoadDocument(ctx, h.Pool, profile)
+	if err != nil {
+		return draftFragmentView{}, &handlerErr{http.StatusInternalServerError, "load resume: " + err.Error()}
+	}
+	canonicalMD := resume.ToMarkdown(doc, res.Bullets)
+
+	view := draftFragmentView{
+		JobID:         jobID,
+		Profile:       profile,
+		TemplateID:    templateID,
+		ResumeVersion: res.Version,
+		TotalCount:    len(res.Bullets),
+		NoDraft:       payload == nil,
+	}
+
+	if payload != nil {
+		removed := map[string]string{}
+		for _, rm := range payload.effectiveRemovals() {
+			removed[rm.RoleID+"."+rm.BulletID] = rm.Reason
+		}
+		rewritten := map[string]deepseek.Rewrite{}
+		for _, rw := range payload.Rewrites {
+			rewritten[rw.RoleID+"."+rw.BulletID] = rw
+		}
+		tailoredMD := resume.ToMarkdown(doc, tailoredBullets(res.Bullets, removed, rewritten))
+		if strings.TrimSpace(tailoredOverride) != "" {
+			tailoredMD = tailoredOverride
+		}
+		view.TailoredMarkdown = tailoredMD
+		view.DiffHTML = diffMarkdownHTML(canonicalMD, tailoredMD)
+		view.Model = payload.Model
+		view.DraftedAt = draftedAt
+		view.CostUSD = payload.CostUSD
+		view.RemovedCount = len(removed)
+		view.RewriteCount = len(rewritten)
+		if payload.ResumeVersion != "" {
+			view.ResumeVersion = payload.ResumeVersion
+		}
+	}
+
+	saved, _ := h.Finalizations.Get(ctx, jobID, profile)
+	view.HasSaved = saved != nil && strings.TrimSpace(saved.Markdown) != ""
+
+	base := strings.TrimSpace(baseOverride)
+	if base == "" && view.HasSaved {
+		base = saved.Markdown
+	}
+	if base == "" && templateID != resume.DefaultTemplateID {
+		if tmd, _ := h.Templates.GetMarkdown(ctx, profile, templateID); strings.TrimSpace(tmd) != "" {
+			base = tmd
+		}
+	}
+	if base == "" {
+		base = canonicalMD
+	}
+	view.BaseMarkdown = base
+	// Highlight how the working copy differs from the full résumé. Skipped when
+	// identical (a fresh, untailored load) so the pane isn't a wall of context.
+	if base != canonicalMD {
+		view.BaseDiffHTML = diffMarkdownHTML(canonicalMD, base)
+	}
+
+	view.TemplateName = "Full résumé"
+	if list, err := h.Templates.List(ctx, profile); err == nil {
+		for _, t := range list {
+			view.ReplaceTargets = append(view.ReplaceTargets, templateOpt{ID: t.ID, Name: t.Name, IsDefault: t.IsDefault})
+			if t.ID == templateID {
+				view.TemplateName = t.Name
+			}
+		}
+	}
+	return view, nil
 }
 
-type draftBulletView struct {
-	CompositeID   string // role_id.bullet_id
-	Text          string // current canonical text
-	Keep          bool
-	Reason        string // removal reason, when the LLM flagged it for drop
-	NewText       string // AI-suggested rewrite; empty when none
-	RewriteReason string
-}
-
-// DraftFragment handles GET /ui/jobs/{id}/draft?profile=…
-// Reads the latest resume_drafted event for this (job, profile) and renders
-// the bullet decisions as an htmx-swappable fragment. Renders an empty-state
-// fragment with a "draft now" button if no event exists yet.
+// DraftFragment handles GET /ui/jobs/{id}/draft?profile=… — renders the two-pane
+// markdown view, with the right pane showing the latest AI diff if one exists.
 func (h *ResumeHandler) DraftFragment(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
-
 	templateID := templateOrDefault(r.URL.Query().Get("template"))
 
 	payload, draftedAt, err := h.latestDraftEvent(r.Context(), jobID, profile)
@@ -572,29 +616,17 @@ func (h *ResumeHandler) DraftFragment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "load draft: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if payload == nil {
-		h.Renderer.HTML(w, http.StatusOK, "draft_fragment", draftFragmentView{
-			JobID:      jobID,
-			Profile:    profile,
-			TemplateID: templateID,
-			NoDraft:    true,
-		})
+	view, herr := h.markdownFragment(r.Context(), jobID, profile, templateID, "", "", payload, draftedAt)
+	if herr != nil {
+		http.Error(w, herr.msg, herr.status)
 		return
 	}
-
-	res, err := resume.LoadTemplate(r.Context(), h.Pool, profile, templateID)
-	if err != nil {
-		http.Error(w, "resume load: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	view := buildDraftView(jobID, profile, draftedAt, payload, res)
-	view.TemplateID = templateID
 	h.Renderer.HTML(w, http.StatusOK, "draft_fragment", view)
 }
 
-// DraftFragmentTrigger handles POST /ui/jobs/{id}/draft.
-// Runs a fresh DeepSeek draft, persists the event, and renders the fragment.
-// Powers the "draft now" button in the empty-state fragment.
+// DraftFragmentTrigger handles POST /ui/jobs/{id}/draft — runs a fresh DeepSeek
+// draft, persists the event, and re-renders the fragment with the diff. The
+// left-pane markdown (carried in the form) is preserved across a re-draft.
 func (h *ResumeHandler) DraftFragmentTrigger(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
@@ -605,10 +637,41 @@ func (h *ResumeHandler) DraftFragmentTrigger(w http.ResponseWriter, r *http.Requ
 		http.Error(w, herr.msg, herr.status)
 		return
 	}
-
 	payload := draftEventPayload(draft, res)
-	view := buildDraftView(jobID, profile, "just now", payload, res)
-	view.TemplateID = templateID
+	view, herr := h.markdownFragment(r.Context(), jobID, profile, templateID, r.FormValue("markdown"), "", payload, "just now")
+	if herr != nil {
+		http.Error(w, herr.msg, herr.status)
+		return
+	}
+	h.Renderer.HTML(w, http.StatusOK, "draft_fragment", view)
+}
+
+// ApplyAI handles POST /ui/jobs/{id}/apply-ai — accept the right pane into the
+// left: re-render with the working copy replaced by the (possibly hand-edited)
+// tailored markdown the right pane posts back. The right pane keeps that same
+// edited text so nothing is lost, and the diff recomputes against it.
+func (h *ResumeHandler) ApplyAI(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
+	templateID := templateOrDefault(r.FormValue("template"))
+
+	payload, draftedAt, err := h.latestDraftEvent(r.Context(), jobID, profile)
+	if err != nil {
+		http.Error(w, "load draft: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if payload == nil {
+		http.Error(w, "no draft to apply — click Draft with AI first", http.StatusBadRequest)
+		return
+	}
+	// The edited right pane becomes both the new working copy (left) and the
+	// right pane's content, so both panes and their diffs reflect it.
+	tailored := r.FormValue("tailored")
+	view, herr := h.markdownFragment(r.Context(), jobID, profile, templateID, tailored, tailored, payload, draftedAt)
+	if herr != nil {
+		http.Error(w, herr.msg, herr.status)
+		return
+	}
 	h.Renderer.HTML(w, http.StatusOK, "draft_fragment", view)
 }
 
@@ -749,92 +812,6 @@ func draftEventPayload(draft *deepseek.DraftResult, res *resume.Resume) *drafted
 	}
 }
 
-// buildDraftView renders the full current resume and overlays the draft's
-// removals as a diff: every bullet is kept (checked) unless the LLM flagged it
-// for removal, in which case it's unchecked and shows the reason. Removals that
-// point at bullets no longer in the resume are simply ignored — the resume is
-// the source of truth, the removals are just a thin overlay.
-func buildDraftView(jobID, profile, draftedAt string, p *draftedEventPayload, res *resume.Resume) draftFragmentView {
-	removed := make(map[string]string) // composite ID -> removal reason
-	for _, rm := range p.effectiveRemovals() {
-		removed[rm.RoleID+"."+rm.BulletID] = rm.Reason
-	}
-	rewritten := make(map[string]deepseek.Rewrite) // composite ID -> rewrite
-	for _, rw := range p.Rewrites {
-		rewritten[rw.RoleID+"."+rw.BulletID] = rw
-	}
-
-	view := draftFragmentView{
-		JobID:         jobID,
-		Profile:       profile,
-		Model:         p.Model,
-		ResumeVersion: p.ResumeVersion,
-		DraftedAt:     draftedAt,
-		CostUSD:       p.CostUSD,
-		TotalCount:    len(res.Bullets),
-	}
-
-	roleIdx := map[string]int{}
-	for _, b := range res.Bullets {
-		idx, seen := roleIdx[b.RoleID]
-		if !seen {
-			view.Roles = append(view.Roles, draftRoleView{
-				RoleID:      b.RoleID,
-				RoleTitle:   b.RoleTitle,
-				RoleCompany: b.RoleCompany,
-				RoleDates:   b.RoleDates,
-			})
-			idx = len(view.Roles) - 1
-			roleIdx[b.RoleID] = idx
-		}
-		reason, isRemoved := removed[b.CompositeID()]
-		if !isRemoved {
-			view.KeptCount++
-		}
-		bv := draftBulletView{
-			CompositeID: b.CompositeID(),
-			Text:        b.Text,
-			Keep:        !isRemoved,
-			Reason:      reason,
-		}
-		// A removed bullet's rewrite (if any) is irrelevant — it's dropped.
-		if rw, ok := rewritten[b.CompositeID()]; ok && !isRemoved {
-			bv.NewText = rw.NewText
-			bv.RewriteReason = rw.Reason
-			view.RewriteCount++
-		}
-		view.Roles[idx].Bullets = append(view.Roles[idx].Bullets, bv)
-	}
-
-	return view
-}
-
-// buildTemplateBullets turns the kept selection + form text into template
-// bullets. An override is recorded only when the final text differs from the
-// canonical bullet, so unchanged bullets stay linked (override nil) and pick up
-// future canonical edits.
-func buildTemplateBullets(kept []string, r *http.Request, canon map[string]string) []templates.Bullet {
-	var out []templates.Bullet
-	for i, cid := range kept {
-		dot := strings.IndexByte(cid, '.')
-		if dot < 0 {
-			continue
-		}
-		text := r.FormValue("text_" + cid)
-		if strings.TrimSpace(text) == "" {
-			text = canon[cid]
-		}
-		var override *string
-		if text != canon[cid] {
-			t := text
-			override = &t
-		}
-		out = append(out, templates.Bullet{
-			RoleID:       cid[:dot],
-			BulletID:     cid[dot+1:],
-			OverrideText: override,
-			SortOrder:    i,
-		})
-	}
-	return out
-}
+// draftEventPayload (above) plus markdownFragment (above) cover the rendering
+// path; the old per-bullet checkbox view builders were removed with the move to
+// the markdown two-pane workflow.

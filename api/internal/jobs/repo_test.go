@@ -74,6 +74,25 @@ func TestList_ArgIndexing(t *testing.T) {
 			},
 		},
 		{
+			name:     "inbox status filter (no extra arg)",
+			params:   ListParams{Profile: "Slava", MinScore: 6.9, Limit: 50, Offset: 0, Status: "inbox"},
+			wantArgs: []any{"Slava", 6.9, 50, 0},
+			wantSQLHas: []string{
+				"a.status IS NULL",
+				"LIMIT $3 OFFSET $4",
+			},
+		},
+		{
+			name:     "explicit status after date filter",
+			params:   ListParams{Profile: "Slava", MinScore: 6.9, Limit: 50, Offset: 0, From: "2026-05-28", DateField: "eval", Status: "applied"},
+			wantArgs: []any{"Slava", 6.9, "2026-05-28", "applied", 50, 0},
+			wantSQLHas: []string{
+				"e.created_at::date >= $3",
+				"a.status = $4",
+				"LIMIT $5 OFFSET $6",
+			},
+		},
+		{
 			name:     "to only",
 			params:   ListParams{Profile: "Kezia", MinScore: 6, Limit: 100, Offset: 200, To: "2026-03-15", DateField: "eval"},
 			wantArgs: []any{"Kezia", 6.0, "2026-03-15", 100, 200},
