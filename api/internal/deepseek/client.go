@@ -31,7 +31,10 @@ import (
 //     competency not surface domain, awards keep-by-default, prune oldest
 //     roles hardest/consistently, reword toward the posting's stack without
 //     inventing tools.
-const PromptVersion = "v5"
+// v6: floor on rewrites — surface at least two or three of the strongest
+//     rewrite opportunities so a job far from the candidate's domain never
+//     comes back with a single suggestion. Removals stay conservative.
+const PromptVersion = "v6"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%
