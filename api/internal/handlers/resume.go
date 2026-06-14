@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/http"
 	"strings"
 
@@ -495,19 +494,17 @@ func (h *ResumeHandler) templateMutation(w http.ResponseWriter, r *http.Request,
 
 // draftFragmentView is the data shape consumed by web/templates/draft_fragment.html.
 // The left pane is the editable working-copy markdown (BaseMarkdown); the right
-// pane is an editable copy of the AI-tailored markdown (TailoredMarkdown). Each
-// pane shows a highlighted diff vs the canonical render below it.
+// pane is an editable copy of the AI-tailored markdown (TailoredMarkdown). The
+// live diff between the two is rendered client-side by web/resume_diff.js.
 type draftFragmentView struct {
 	JobID            string
 	Profile          string
 	TemplateID       string
 	TemplateName     string // display name for the selected template
-	NoDraft          bool          // no AI draft yet → right pane shows the trigger
-	BaseMarkdown     string        // left textarea content
-	BaseDiffHTML     template.HTML // left pane: canonical → working-copy diff (empty if identical)
-	DiffHTML         template.HTML // right pane: canonical → tailored diff
-	TailoredMarkdown string        // payload for "Apply AI suggestions"
-	HasSaved         bool          // a generated resume exists → show Preview PDF
+	NoDraft          bool   // no AI draft yet → right pane shows the trigger
+	BaseMarkdown     string // left textarea content
+	TailoredMarkdown string // payload for "Apply AI suggestions"
+	HasSaved         bool   // a generated resume exists → show Preview PDF
 	Model            string
 	ResumeVersion    string
 	DraftedAt        string
@@ -559,7 +556,6 @@ func (h *ResumeHandler) markdownFragment(ctx context.Context, jobID, profile, te
 			tailoredMD = tailoredOverride
 		}
 		view.TailoredMarkdown = tailoredMD
-		view.DiffHTML = diffMarkdownHTML(canonicalMD, tailoredMD)
 		view.Model = payload.Model
 		view.DraftedAt = draftedAt
 		view.CostUSD = payload.CostUSD
@@ -586,11 +582,6 @@ func (h *ResumeHandler) markdownFragment(ctx context.Context, jobID, profile, te
 		base = canonicalMD
 	}
 	view.BaseMarkdown = base
-	// Highlight how the working copy differs from the full résumé. Skipped when
-	// identical (a fresh, untailored load) so the pane isn't a wall of context.
-	if base != canonicalMD {
-		view.BaseDiffHTML = diffMarkdownHTML(canonicalMD, base)
-	}
 
 	view.TemplateName = "Full résumé"
 	if list, err := h.Templates.List(ctx, profile); err == nil {

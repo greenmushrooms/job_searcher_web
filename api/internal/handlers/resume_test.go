@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
@@ -77,23 +76,6 @@ func TestTailoredBullets(t *testing.T) {
 	}
 	if got[1].Text != "rewritten text" {
 		t.Errorf("b2 not rewritten: %q", got[1].Text)
-	}
-}
-
-func TestDiffMarkdownHTML(t *testing.T) {
-	base := "# Resume\n\n- alpha\n- beta\n"
-	tailored := "# Resume\n\n- alpha\n- BETA improved\n"
-
-	html := string(diffMarkdownHTML(base, tailored))
-
-	if !strings.Contains(html, "diff-del") || !strings.Contains(html, "beta") {
-		t.Errorf("expected a deletion line for 'beta':\n%s", html)
-	}
-	if !strings.Contains(html, "diff-add") || !strings.Contains(html, "BETA improved") {
-		t.Errorf("expected an addition line for 'BETA improved':\n%s", html)
-	}
-	if !strings.Contains(html, "diff-ctx") {
-		t.Errorf("expected context lines for the unchanged header:\n%s", html)
 	}
 }
 
