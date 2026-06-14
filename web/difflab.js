@@ -85,6 +85,90 @@
     b.addEventListener('click', function () { save(b.dataset.target); });
   });
 
+  // PDF is the per-job document, so it renders the RIGHT (job) pane. POST the
+  // job markdown to the existing resume.pdf route (which saves it then streams
+  // the PDF) via a hidden form so the PDF opens in a new tab.
+  var pdfBtn = document.getElementById('pdfBtn');
+  if (pdfBtn) pdfBtn.addEventListener('click', function () {
+    if (!jobId) { showToast('No job selected', true); return; }
+    var f = document.createElement('form');
+    f.method = 'POST'; f.action = '/ui/jobs/' + jobId + '/resume.pdf'; f.target = '_blank'; f.style.display = 'none';
+    [['profile', profile], ['markdown', currentText('right')]].forEach(function (kv) {
+      var inp = document.createElement('input'); inp.type = 'hidden'; inp.name = kv[0]; inp.value = kv[1]; f.appendChild(inp);
+    });
+    document.body.appendChild(f); f.submit(); f.remove();
+  });
+
+  // ── version history (SCD2) ───────────────────────────────────────────────
+  // The right pane is the per-job résumé; every save keeps the old version, so
+  // the dropdown lists them all and lets you preview/restore an earlier one.
+  var versionSel = document.getElementById('versionSel');
+  var restoreBtn = document.getElementById('restoreBtn');
+  var versionMarkdown = {};   // version number -> markdown
+  var currentVersion = null;
+
+  function setRight(text) {
+    if (variant === 'v2' && window.__cmSet) { window.__cmSet('b', text); return; }
+    right.value = text;
+    right.dispatchEvent(new Event('input')); // refresh v1 overlay
+  }
+
+  function updateRestoreBtn() {
+    if (!restoreBtn || !versionSel) return;
+    var sel = parseInt(versionSel.value, 10);
+    var hide = !sel || sel === currentVersion;
+    restoreBtn.style.display = hide ? 'none' : '';
+    if (!hide) restoreBtn.textContent = '↩ Restore v' + sel;
+  }
+
+  function loadVersions() {
+    if (!versionSel || !jobId) return;
+    fetch('/ui/jobs/' + jobId + '/resume/versions?profile=' + encodeURIComponent(profile))
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (list) {
+        var picker = versionSel.closest('.ver-pick') || versionSel;
+        if (!list || !list.length) { picker.style.display = 'none'; return; }
+        picker.style.display = '';
+        versionMarkdown = {};
+        versionSel.innerHTML = '';
+        list.forEach(function (v) {
+          versionMarkdown[v.version] = v.markdown;
+          if (v.isCurrent) currentVersion = v.version;
+          var o = document.createElement('option');
+          o.value = v.version;
+          o.textContent = 'v' + v.version + (v.isCurrent ? ' (current)' : '') +
+                          ' · ' + (v.generatedAt || '').slice(0, 16);
+          versionSel.appendChild(o);
+        });
+        versionSel.value = currentVersion;
+        updateRestoreBtn();
+      }).catch(function () { /* offline / no versions — leave hidden */ });
+  }
+
+  if (versionSel) versionSel.addEventListener('change', function () {
+    var sel = parseInt(versionSel.value, 10);
+    if (versionMarkdown[sel] != null) setRight(versionMarkdown[sel]);
+    updateRestoreBtn();
+  });
+
+  if (restoreBtn) restoreBtn.addEventListener('click', function () {
+    var sel = parseInt(versionSel.value, 10);
+    if (!jobId || !sel || sel === currentVersion) return;
+    fetch('/ui/jobs/' + jobId + '/resume/versions/' + sel + '/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ profile: profile }),
+    }).then(function (res) {
+      if (!res.ok) { showToast('Restore failed (' + res.status + ')', true); return; }
+      return res.json().then(function (j) {
+        showToast('Restored as v' + j.version + ' ✓');
+        loadVersions(); // refresh dropdown; right pane already shows this content
+      });
+    }).catch(function () { showToast('Network error', true); });
+  });
+
+  loadVersions();
+
   // ── scroll sync (v1, v3) ────────────────────────────────────────────────
   function syncScroll(a, b) {
     var lock = false;

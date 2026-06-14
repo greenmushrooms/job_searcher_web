@@ -67,7 +67,7 @@ SELECT
     EXISTS (
         SELECT 1 FROM web.jobs_resume jr
         WHERE jr.job_id = j.id AND jr.sys_profile = e.sys_profile
-          AND COALESCE(jr.markdown, '') <> ''
+          AND jr.is_current AND COALESCE(jr.markdown, '') <> ''
     ) AS has_resume
 FROM public.evaluated_jobs e
 JOIN public.jobspy_jobs j ON e.job_id = j.id
@@ -88,7 +88,7 @@ SELECT
     EXISTS (
         SELECT 1 FROM web.jobs_resume jr
         WHERE jr.job_id = j.id AND jr.sys_profile = e.sys_profile
-          AND COALESCE(jr.markdown, '') <> ''
+          AND jr.is_current AND COALESCE(jr.markdown, '') <> ''
     ) AS has_resume
 FROM public.evaluated_jobs e
 JOIN public.jobspy_jobs j ON e.job_id = j.id

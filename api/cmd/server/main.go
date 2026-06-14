@@ -122,6 +122,8 @@ func main() {
 			r.Post("/jobs/{id}/replace-template", rh.ReplaceTemplate)
 			r.Get("/jobs/{id}/resume.pdf", rh.ResumePDF)
 			r.Post("/jobs/{id}/resume.pdf", rh.GeneratePDF)
+			r.Get("/jobs/{id}/resume/versions", rh.ResumeVersions)                 // SCD2 version history
+			r.Post("/jobs/{id}/resume/versions/{version}/restore", rh.RestoreResumeVersion)
 			r.Get("/jobs/{id}/cover-letter", rh.CoverLetterFragment)
 			r.Post("/jobs/{id}/cover-letter", rh.SaveCoverLetter)
 			r.Post("/jobs/{id}/cover-letter.pdf", rh.CoverLetterPDF)

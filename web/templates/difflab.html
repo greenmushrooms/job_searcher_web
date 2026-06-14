@@ -13,6 +13,8 @@
   button.btn:hover { background: #1340b5; }
   button.btn.alt { background: #0a7d2e; } button.btn.alt:hover { background: #086324; }
   .actions { display: flex; gap: .5rem; align-items: center; margin-bottom: .7rem; }
+  .ver-pick { display: flex; gap: .3rem; align-items: center; font-size: 12px; color: #555; }
+  .ver-pick select { font-size: 12px; padding: .3rem; border: 1px solid #bbb; border-radius: 4px; }
   #toast { font-size: 12.5px; font-weight: 600; color: #0a7d2e; }
   #toast.err { color: #b00020; }
 
@@ -44,7 +46,11 @@
   .hl-add { background: #e2f7e8; }
 
   /* ── v2: two CodeMirror editors + line-level diff ── */
-  #cm { display: flex; border: 1px solid #ccc; border-radius: 5px; overflow: hidden; }
+  #cm { display: flex; position: relative; border: 1px solid #ccc; border-radius: 5px; overflow: hidden; }
+  #cmgutter { position: absolute; left: 50%; top: 0; bottom: 0; width: 0; pointer-events: none; z-index: 5; }
+  .hunk-ctl { position: absolute; left: -20px; display: flex; gap: 2px; pointer-events: auto; }
+  .hunk-ctl button { width: 19px; height: 19px; padding: 0; line-height: 17px; font-size: 13px; border: 1px solid #bbb; border-radius: 3px; background: #fff; color: #333; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+  .hunk-ctl button:hover { background: #1a4ed8; color: #fff; border-color: #1a4ed8; }
   .cm-col { flex: 1; min-width: 0; }
   .cm-col:first-child { border-right: 1px solid #e3e3e3; }
   .cm-col-head { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #888; padding: .35rem .5rem; background: #fafafa; border-bottom: 1px solid #eee; }
@@ -80,6 +86,11 @@
   <div class="actions">
     <button type="button" class="btn save" data-target="left">💾 Save master</button>
     <button type="button" class="btn alt save" data-target="right">💾 Save for job</button>
+    <button type="button" class="btn" id="pdfBtn" style="background:#6b21a8">📄 PDF (this job)</button>
+    <label class="ver-pick" style="display:none">Job version
+      <select id="versionSel"></select>
+    </label>
+    <button type="button" class="btn" id="restoreBtn" style="display:none;background:#0f766e">↩ Restore</button>
     {{- if eq .Variant "v3" }}
     <button type="button" class="btn" id="compareBtn" style="background:#444">🔍 Compare</button>
     {{- end }}
@@ -90,6 +101,7 @@
   <div id="cm">
     <div class="cm-col"><div class="cm-col-head"><b>Master résumé</b> — saved permanently</div><div id="cmA"></div></div>
     <div class="cm-col"><div class="cm-col-head"><b>This job</b> — saved for this job only</div><div id="cmB"></div></div>
+    <div id="cmgutter"></div>
   </div>
   <div class="cm-note">CodeMirror editors with a line-level diff — both sides editable, highlights update live. Loads the editor from a CDN (needs internet).</div>
   <textarea id="left" hidden>{{ .MasterMarkdown }}</textarea>
@@ -274,7 +286,52 @@
       }
       if (pendDel.length) rightSpacers.push({ pos: m, src: pendDel });
       if (pendAdd.length) leftSpacers.push({ pos: n, src: pendAdd });
-      return { aLine, bLine, leftSpacers, rightSpacers, balanceRows };
+      return { aLine, bLine, leftSpacers, rightSpacers, balanceRows, rows, n, m };
+    }
+
+    // Group consecutive changed rows into hunks. Each hunk records the left/right
+    // line indices it spans and the anchor line on each side (the line right
+    // after it) so a pure insertion/deletion knows where to land.
+    function buildHunks(rows, n, m) {
+      const hunks = []; let cur = null;
+      for (const row of rows) {
+        if (row.kind === 'same') {
+          if (cur) { cur.leftAnchor = row.l; cur.rightAnchor = row.r; hunks.push(cur); cur = null; }
+        } else {
+          if (!cur) cur = { L: [], R: [], leftAnchor: n, rightAnchor: m, topL: -1, topR: -1 };
+          if (row.l >= 0) { cur.L.push(row.l); if (cur.topL < 0) cur.topL = row.l; }
+          if (row.r >= 0) { cur.R.push(row.r); if (cur.topR < 0) cur.topR = row.r; }
+        }
+      }
+      if (cur) hunks.push(cur);
+      return hunks;
+    }
+
+    // Apply one hunk to the other side: '>' makes the right pane match the left
+    // for that section (left→right), '<' makes the left match the right.
+    function blockText(doc, idxs) {
+      return doc.sliceString(doc.line(idxs[0] + 1).from, doc.line(idxs[idxs.length - 1] + 1).to);
+    }
+    function writeLines(view, idxs, text, anchorIdx) {
+      const doc = view.state.doc;
+      if (idxs.length) {
+        if (text === null) { // delete these whole lines (with one surrounding newline)
+          const last = idxs[idxs.length - 1];
+          const from = (last + 1 < doc.lines) ? doc.line(idxs[0] + 1).from : (idxs[0] > 0 ? doc.line(idxs[0]).to : doc.line(idxs[0] + 1).from);
+          const to = (last + 1 < doc.lines) ? doc.line(last + 2).from : doc.line(last + 1).to;
+          view.dispatch({ changes: { from, to, insert: '' } });
+        } else { // replace the line contents
+          view.dispatch({ changes: { from: doc.line(idxs[0] + 1).from, to: doc.line(idxs[idxs.length - 1] + 1).to, insert: text } });
+        }
+      } else if (text !== null) { // insert new lines at the anchor
+        const atEnd = anchorIdx >= doc.lines;
+        const pos = atEnd ? doc.length : doc.line(anchorIdx + 1).from;
+        view.dispatch({ changes: { from: pos, to: pos, insert: atEnd ? (doc.length ? '\n' + text : text) : text + '\n' } });
+      }
+    }
+    function applyHunk(h, dir) {
+      if (dir === 'toRight') writeLines(right, h.R, h.L.length ? blockText(left.state.doc, h.L) : null, h.rightAnchor);
+      else writeLines(left, h.L, h.R.length ? blockText(right.state.doc, h.R) : null, h.leftAnchor);
     }
 
     class Spacer extends WidgetType {
@@ -324,7 +381,7 @@
       return list.map(sp => ({ pos: sp.pos, side: 'before', height: lineHeights(srcView, sp.src) }));
     }
 
-    let left, right;
+    let left, right, hunks = [];
     function recompute() {
       const d = computeDiff(left.state.doc.toString(), right.state.doc.toString());
       const lsp = resolveSpacers(d.leftSpacers, right), rsp = resolveSpacers(d.rightSpacers, left);
@@ -336,23 +393,59 @@
       }
       left.dispatch({ effects: setDeco.of(buildDeco(left, d.aLine, lsp, 'left')) });
       right.dispatch({ effects: setDeco.of(buildDeco(right, d.bLine, rsp, 'right')) });
+      hunks = buildHunks(d.rows, d.n, d.m);
+      requestAnimationFrame(positionGutter);
     }
     const listener = EditorView.updateListener.of(u => { if (u.docChanged) queueMicrotask(recompute); });
+
+    // Render the center ‹ / › controls, one per hunk, at the hunk's top Y. ‹ pulls
+    // the right version into the left; › pushes the left version into the right.
+    function positionGutter() {
+      const gutter = document.getElementById('cmgutter');
+      if (!gutter) return;
+      gutter.innerHTML = '';
+      const cmTop = document.getElementById('cm').getBoundingClientRect().top;
+      const scTop = left.scrollDOM.getBoundingClientRect().top - cmTop;
+      const viewH = left.scrollDOM.clientHeight, scroll = left.scrollDOM.scrollTop;
+      for (const h of hunks) {
+        let blockTop;
+        if (h.topL >= 0) blockTop = left.lineBlockAt(left.state.doc.line(h.topL + 1).from).top;
+        else if (h.topR >= 0) blockTop = right.lineBlockAt(right.state.doc.line(h.topR + 1).from).top;
+        else continue;
+        const y = blockTop - scroll;
+        if (y < -10 || y > viewH + 10) continue;
+        const ctl = document.createElement('div');
+        ctl.className = 'hunk-ctl';
+        ctl.style.top = (scTop + y + 1) + 'px';
+        const bl = document.createElement('button'); bl.type = 'button'; bl.textContent = '‹'; bl.title = 'Use the right version here (right → left)';
+        const br = document.createElement('button'); br.type = 'button'; br.textContent = '›'; br.title = 'Use the left version here (left → right)';
+        bl.addEventListener('click', () => applyHunk(h, 'toLeft'));
+        br.addEventListener('click', () => applyHunk(h, 'toRight'));
+        ctl.appendChild(bl); ctl.appendChild(br); gutter.appendChild(ctl);
+      }
+    }
 
     left = new EditorView({ doc: document.getElementById('left').value, extensions: [basicSetup, diffField, listener, EditorView.lineWrapping], parent: document.getElementById('cmA') });
     right = new EditorView({ doc: document.getElementById('right').value, extensions: [basicSetup, diffField, listener, EditorView.lineWrapping], parent: document.getElementById('cmB') });
     // First pass after layout so spacer heights measure real (wrapped) lines.
     setTimeout(recompute, 120);
 
-    // Aligned heights → 1:1 scroll sync.
+    // Aligned heights → 1:1 scroll sync; keep the center controls pinned to
+    // their hunks as the panes scroll.
     (function (a, b) {
       let lock = false;
-      function bind(s, d) { s.addEventListener('scroll', () => { if (lock) return; lock = true; d.scrollTop = s.scrollTop; requestAnimationFrame(() => lock = false); }); }
+      function bind(s, d) { s.addEventListener('scroll', () => { requestAnimationFrame(positionGutter); if (lock) return; lock = true; d.scrollTop = s.scrollTop; requestAnimationFrame(() => lock = false); }); }
       bind(a, b); bind(b, a);
     })(left.scrollDOM, right.scrollDOM);
+    window.addEventListener('resize', () => requestAnimationFrame(positionGutter));
 
-    // Expose current text so the shared save buttons can read it.
+    // Expose get/set so the shared save buttons and version picker can read and
+    // replace either pane's text (replacing the doc fires the diff recompute).
     window.__cmGet = (side) => side === 'a' ? left.state.doc.toString() : right.state.doc.toString();
+    window.__cmSet = (side, text) => {
+      const v = side === 'a' ? left : right;
+      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } });
+    };
   </script>
   {{- end }}
 </body>
