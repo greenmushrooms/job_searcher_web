@@ -49,6 +49,7 @@ type DocBullet struct {
 }
 
 type DocEducation struct {
+	ID          string `json:"id"`
 	Degree      string `json:"degree"`
 	Institution string `json:"institution"`
 	Location    string `json:"location"`
@@ -136,14 +137,14 @@ func LoadDocument(ctx context.Context, q db.Querier, profile string) (*Document,
 	}
 
 	eduRows, err := q.Query(ctx, `
-		SELECT degree, institution, location FROM web.resume_education
+		SELECT education_id, degree, institution, location FROM web.resume_education
 		WHERE sys_profile = $1 ORDER BY sort_order, education_id`, profile)
 	if err != nil {
 		return nil, fmt.Errorf("query education: %w", err)
 	}
 	for eduRows.Next() {
 		var e DocEducation
-		if err := eduRows.Scan(&e.Degree, &e.Institution, &e.Location); err != nil {
+		if err := eduRows.Scan(&e.ID, &e.Degree, &e.Institution, &e.Location); err != nil {
 			eduRows.Close()
 			return nil, err
 		}

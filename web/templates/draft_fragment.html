@@ -12,6 +12,7 @@
   <header class="draft-meta">
     <span class="meta-item"><b>removed</b> {{ .RemovedCount }}</span>
     <span class="meta-item"><b>rewritten</b> {{ .RewriteCount }}</span>
+    {{- if gt .EducationPrunedCount 0 }}<span class="meta-item"><b>edu pruned</b> {{ .EducationPrunedCount }}</span>{{ end }}
     <span class="meta-item"><b>template</b> {{ .TemplateName }}</span>
     <span class="meta-item"><b>model</b> {{ .Model }}</span>
     <span class="meta-item"><b>résumé</b> {{ .ResumeVersion }}</span>

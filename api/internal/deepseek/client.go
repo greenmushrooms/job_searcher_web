@@ -39,7 +39,11 @@ import (
 //     tense-only reasons are rejected), must foreground must-have tools the
 //     candidate genuinely has, and may use ONLY tools already present in the
 //     bullet text (no introducing/swapping tools). Quality over quantity.
-const PromptVersion = "v7"
+// v8: education entries can now be pruned. The model sees the education list
+//     and may drop SUPPLEMENTARY entries (professional exams, certifications,
+//     standalone courses) when clearly irrelevant to the posting. Degrees and
+//     diplomas are keep-by-default and never listed.
+const PromptVersion = "v8"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%
@@ -74,6 +78,14 @@ type Rewrite struct {
 	Reason   string `json:"reason"`
 }
 
+// EducationRemoval is one SUPPLEMENTARY education entry the LLM recommends
+// dropping for this job (e.g. a professional exam or certification that's
+// irrelevant here). Degrees are never listed. Entries not listed are kept.
+type EducationRemoval struct {
+	EducationID string `json:"education_id"`
+	Reason      string `json:"reason"`
+}
+
 // Usage mirrors the chat-completions response.usage object.
 type Usage struct {
 	PromptTokens     int     `json:"prompt_tokens"`
@@ -83,11 +95,12 @@ type Usage struct {
 }
 
 type DraftResult struct {
-	Removals      []Removal `json:"removals"`
-	Rewrites      []Rewrite `json:"rewrites"`
-	Usage         Usage     `json:"usage"`
-	Model         string    `json:"model"`
-	PromptVersion string    `json:"prompt_version"`
+	Removals          []Removal          `json:"removals"`
+	Rewrites          []Rewrite          `json:"rewrites"`
+	EducationRemovals []EducationRemoval `json:"education_removals"`
+	Usage             Usage              `json:"usage"`
+	Model             string             `json:"model"`
+	PromptVersion     string             `json:"prompt_version"`
 }
 
 type Client struct {
@@ -125,10 +138,11 @@ func NewFromEnv() (*Client, error) {
 
 var ErrNotConfigured = errors.New("DEEPSEEK_API_KEY not set")
 
-// Draft sends the job description + active bullet pool to the LLM and
-// returns the bullets it recommends removing for this job.
-func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []resume.Bullet) (*DraftResult, error) {
-	prompt := buildPrompt(jobDescription, bullets)
+// Draft sends the job description + active bullet pool (and supplementary
+// education entries) to the LLM and returns what it recommends removing or
+// rewriting for this job.
+func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []resume.Bullet, education []resume.DocEducation) (*DraftResult, error) {
+	prompt := buildPrompt(jobDescription, bullets, education)
 
 	reqBody := chatRequest{
 		Model: c.Model,
@@ -153,8 +167,9 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 	}
 
 	var parsed struct {
-		Removals []Removal `json:"removals"`
-		Rewrites []Rewrite `json:"rewrites"`
+		Removals          []Removal          `json:"removals"`
+		Rewrites          []Rewrite          `json:"rewrites"`
+		EducationRemovals []EducationRemoval `json:"education_removals"`
 	}
 	content := resp.Choices[0].Message.Content
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
@@ -168,11 +183,12 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 		CostUSD:          estimateCost(c.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens),
 	}
 	return &DraftResult{
-		Removals:      parsed.Removals,
-		Rewrites:      parsed.Rewrites,
-		Usage:         usage,
-		Model:         c.Model,
-		PromptVersion: PromptVersion,
+		Removals:          parsed.Removals,
+		Rewrites:          parsed.Rewrites,
+		EducationRemovals: parsed.EducationRemovals,
+		Usage:             usage,
+		Model:             c.Model,
+		PromptVersion:     PromptVersion,
 	}, nil
 }
 

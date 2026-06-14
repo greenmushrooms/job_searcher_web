@@ -40,13 +40,14 @@ type draftRequestBody struct {
 }
 
 type draftResponse struct {
-	Removals      []deepseek.Removal `json:"removals"`
-	Rewrites      []deepseek.Rewrite `json:"rewrites"`
-	Usage         deepseek.Usage     `json:"usage"`
-	Model         string             `json:"model"`
-	PromptVersion string             `json:"prompt_version"`
-	ResumeVersion string             `json:"resume_version"`
-	BulletCount   int                `json:"bullet_count"`
+	Removals          []deepseek.Removal          `json:"removals"`
+	Rewrites          []deepseek.Rewrite          `json:"rewrites"`
+	EducationRemovals []deepseek.EducationRemoval `json:"education_removals"`
+	Usage             deepseek.Usage              `json:"usage"`
+	Model             string                      `json:"model"`
+	PromptVersion     string                      `json:"prompt_version"`
+	ResumeVersion     string                      `json:"resume_version"`
+	BulletCount       int                         `json:"bullet_count"`
 }
 
 // Draft handles POST /api/v1/jobs/{id}/draft-resume.
@@ -71,13 +72,14 @@ func (h *ResumeHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := draftResponse{
-		Removals:      draft.Removals,
-		Rewrites:      draft.Rewrites,
-		Usage:         draft.Usage,
-		Model:         draft.Model,
-		PromptVersion: draft.PromptVersion,
-		ResumeVersion: res.Version,
-		BulletCount:   len(res.Bullets),
+		Removals:          draft.Removals,
+		Rewrites:          draft.Rewrites,
+		EducationRemovals: draft.EducationRemovals,
+		Usage:             draft.Usage,
+		Model:             draft.Model,
+		PromptVersion:     draft.PromptVersion,
+		ResumeVersion:     res.Version,
+		BulletCount:       len(res.Bullets),
 	}
 	if eventErr != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -509,10 +511,11 @@ type draftFragmentView struct {
 	ResumeVersion    string
 	DraftedAt        string
 	CostUSD          float64
-	RemovedCount     int
-	RewriteCount     int
-	TotalCount       int
-	ReplaceTargets   []templateOpt // stored templates for the "Replace" dropdown
+	RemovedCount         int
+	RewriteCount         int
+	EducationPrunedCount int
+	TotalCount           int
+	ReplaceTargets       []templateOpt // stored templates for the "Replace" dropdown
 }
 
 // markdownFragment assembles the two-pane view. The right pane is an editable
@@ -551,7 +554,13 @@ func (h *ResumeHandler) markdownFragment(ctx context.Context, jobID, profile, te
 		for _, rw := range payload.Rewrites {
 			rewritten[rw.RoleID+"."+rw.BulletID] = rw
 		}
-		tailoredMD := resume.ToMarkdown(doc, tailoredBullets(res.Bullets, removed, rewritten))
+		removedEdu := map[string]string{}
+		for _, er := range payload.EducationRemovals {
+			removedEdu[er.EducationID] = er.Reason
+		}
+		// Prune education only on the tailored (right) side; the working copy
+		// (base) keeps the full education list.
+		tailoredMD := resume.ToMarkdown(docWithEducationPruned(doc, removedEdu), tailoredBullets(res.Bullets, removed, rewritten))
 		if strings.TrimSpace(tailoredOverride) != "" {
 			tailoredMD = tailoredOverride
 		}
@@ -561,6 +570,7 @@ func (h *ResumeHandler) markdownFragment(ctx context.Context, jobID, profile, te
 		view.CostUSD = payload.CostUSD
 		view.RemovedCount = len(removed)
 		view.RewriteCount = len(rewritten)
+		view.EducationPrunedCount = len(removedEdu)
 		if payload.ResumeVersion != "" {
 			view.ResumeVersion = payload.ResumeVersion
 		}
@@ -675,10 +685,11 @@ type draftedEventPayload struct {
 	PromptVersion string             `json:"prompt_version"`
 	Model         string             `json:"model"`
 	ResumeVersion string             `json:"resume_version"`
-	CostUSD       float64            `json:"cost_usd"`
-	BulletCount   int                `json:"bullet_count"`
-	Removals      []deepseek.Removal `json:"removals"`
-	Rewrites      []deepseek.Rewrite `json:"rewrites"`
+	CostUSD           float64                     `json:"cost_usd"`
+	BulletCount       int                         `json:"bullet_count"`
+	Removals          []deepseek.Removal          `json:"removals"`
+	Rewrites          []deepseek.Rewrite          `json:"rewrites"`
+	EducationRemovals []deepseek.EducationRemoval `json:"education_removals"`
 	// LegacyDecisions reads pre-v2 events that stored per-bullet keep/drop
 	// decisions instead of removals. effectiveRemovals() folds them in.
 	LegacyDecisions []legacyDecision `json:"decisions,omitempty"`
@@ -738,22 +749,30 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		return nil, nil, nil, &handlerErr{http.StatusInternalServerError, "resume load: " + err.Error()}
 	}
 
-	draft, err := h.DeepSeek.Draft(ctx, *job.Description, res.Bullets)
+	// The full document gives the model the supplementary education entries it
+	// may prune (exams/certs); education is profile-wide, not template-specific.
+	doc, err := resume.LoadDocument(ctx, h.Pool, profile)
+	if err != nil {
+		return nil, nil, nil, &handlerErr{http.StatusInternalServerError, "load resume: " + err.Error()}
+	}
+
+	draft, err := h.DeepSeek.Draft(ctx, *job.Description, res.Bullets, doc.Education)
 	if err != nil {
 		return nil, nil, nil, &handlerErr{http.StatusBadGateway, "deepseek: " + err.Error()}
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"prompt_version":    draft.PromptVersion,
-		"model":             draft.Model,
-		"resume_version":    res.Version,
-		"prompt_tokens":     draft.Usage.PromptTokens,
-		"completion_tokens": draft.Usage.CompletionTokens,
-		"total_tokens":      draft.Usage.TotalTokens,
-		"cost_usd":          draft.Usage.CostUSD,
-		"bullet_count":      len(res.Bullets),
-		"removals":          draft.Removals,
-		"rewrites":          draft.Rewrites,
+		"prompt_version":     draft.PromptVersion,
+		"model":              draft.Model,
+		"resume_version":     res.Version,
+		"prompt_tokens":      draft.Usage.PromptTokens,
+		"completion_tokens":  draft.Usage.CompletionTokens,
+		"total_tokens":       draft.Usage.TotalTokens,
+		"cost_usd":           draft.Usage.CostUSD,
+		"bullet_count":       len(res.Bullets),
+		"removals":           draft.Removals,
+		"rewrites":           draft.Rewrites,
+		"education_removals": draft.EducationRemovals,
 	})
 	_, eventErr := h.Pool.Exec(ctx, `
         INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
@@ -793,13 +812,14 @@ func (h *ResumeHandler) latestDraftEvent(ctx context.Context, jobID, profile str
 // hand and don't need to round-trip through the DB.
 func draftEventPayload(draft *deepseek.DraftResult, res *resume.Resume) *draftedEventPayload {
 	return &draftedEventPayload{
-		PromptVersion: draft.PromptVersion,
-		Model:         draft.Model,
-		ResumeVersion: res.Version,
-		CostUSD:       draft.Usage.CostUSD,
-		BulletCount:   len(res.Bullets),
-		Removals:      draft.Removals,
-		Rewrites:      draft.Rewrites,
+		PromptVersion:     draft.PromptVersion,
+		Model:             draft.Model,
+		ResumeVersion:     res.Version,
+		CostUSD:           draft.Usage.CostUSD,
+		BulletCount:       len(res.Bullets),
+		Removals:          draft.Removals,
+		Rewrites:          draft.Rewrites,
+		EducationRemovals: draft.EducationRemovals,
 	}
 }
 
