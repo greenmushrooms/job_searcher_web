@@ -34,7 +34,12 @@ import (
 // v6: floor on rewrites — surface at least two or three of the strongest
 //     rewrite opportunities so a job far from the candidate's domain never
 //     comes back with a single suggestion. Removals stay conservative.
-const PromptVersion = "v6"
+// v7: relevance-first rewrites — replaces v6's count floor. Each rewrite's
+//     reason must name the specific posting requirement it serves (grammar/
+//     tense-only reasons are rejected), must foreground must-have tools the
+//     candidate genuinely has, and may use ONLY tools already present in the
+//     bullet text (no introducing/swapping tools). Quality over quantity.
+const PromptVersion = "v7"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%
