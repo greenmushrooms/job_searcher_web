@@ -1,5 +1,7 @@
 .env
 .env.local
+# real-secret deploy artifacts: live in the project dir, never committed
+deploy/*.local.*
 api/server
 api/cmd/server/server
 *.log
