@@ -128,6 +128,7 @@ func main() {
 			r.Post("/jobs/{id}/cover-letter", rh.SaveCoverLetter)
 			r.Post("/jobs/{id}/cover-letter.pdf", rh.CoverLetterPDF)
 			r.Post("/resume/master", rh.SaveMaster) // diff lab: permanent master save
+			r.Post("/difflab/diff", rh.DiffLabCompute) // diff lab v4: zero-JS recompute
 
 			// Resume template manager (rename / delete / set default).
 			r.Get("/resume/templates", rh.TemplatesManager)
@@ -162,11 +163,13 @@ func main() {
 		http.Redirect(w, req, "/jobs.html", http.StatusFound)
 	})
 
-	// Diff-lab comparison pages — three highlighting variants of the two-pane
-	// master-vs-job résumé editor, to pick one.
+	// Diff-lab comparison pages — highlighting variants of the two-pane
+	// master-vs-job résumé editor, to pick one. v4 is the zero-JS, server-
+	// rendered diff (no CodeMirror): it recomputes via POST /ui/difflab/diff.
 	r.Get("/v1", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v1") })
 	r.Get("/v2", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v2") })
 	r.Get("/v3", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v3") })
+	r.Get("/v4", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v4") })
 
 	// Serve web/ as static, but never the templates/ subdir — those are Go
 	// template sources rendered server-side, not public assets.

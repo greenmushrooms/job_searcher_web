@@ -8,8 +8,10 @@
      hx-get="/ui/jobs/{{ .ID }}/workspace?profile={{ .Profile }}"
      hx-target="#job-detail" hx-swap="innerHTML">
   <div class="jr-top">
-    <span class="jr-badge jr-{{ if eq .Status "" }}unread{{ else }}{{ .Status }}{{ end }}">
-      {{- if eq .Status "applied" }}✓{{ else if eq .Status "skipped" }}✗{{ else if eq .Status "interview" }}★{{ else }}•{{ end -}}
+    <span class="jr-badge jr-{{ if .Final }}{{ .Final }}{{ else if .Status }}{{ .Status }}{{ else }}unread{{ end }}">
+      {{- if .Final -}}
+        {{- if eq .Final "rejected" }}⊘{{ else if eq .Final "offer" }}🎉{{ end -}}
+      {{- else if eq .Status "applied" }}✓{{ else if eq .Status "screen" }}☎{{ else if eq .Status "interview" }}★{{ else if eq .Status "skipped" }}✗{{ else }}•{{ end -}}
     </span>
     <span class="jr-title">{{ .Title }}</span>
     {{- if .HasResume }}<span class="jr-doc" title="résumé saved">📄</span>{{ end }}

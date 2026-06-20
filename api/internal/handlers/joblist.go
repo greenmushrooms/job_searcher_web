@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -36,6 +37,7 @@ type jobRowView struct {
 	Score     string
 	EvalDate  string
 	Status    string // "" == unread (no decision yet)
+	Final     string // "" == still open; else terminal outcome (rejected/offer)
 	HasResume bool   // a saved résumé exists for this job → 📄 badge
 	OOB       bool   // render with hx-swap-oob for out-of-band row updates
 }
@@ -61,6 +63,7 @@ type jobSummaryView struct {
 	TechStack    string
 	Compensation string
 	Status       string // "" == undecided
+	Final        string // "" == still open; else terminal outcome (rejected/offer)
 }
 
 // jobStatusUpdateView renders the summary (main swap target) plus the updated
@@ -107,8 +110,17 @@ func (h *JobUIHandler) JobList(w http.ResponseWriter, r *http.Request) {
 			p.From = time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 		}
 	}
-	if v := q.Get("status"); v == "inbox" || v == "applied" || v == "skipped" || v == "interview" {
+	if v := q.Get("status"); v == "inbox" || v == "applied" || v == "screen" ||
+		v == "interview" || v == "skipped" || v == "rejected" || v == "offer" {
 		p.Status = v
+	}
+	// Free-text search behaves like an email search box: a query matches across
+	// title/company/location regardless of score or date, so drop the score
+	// floor and the default date window when one is present.
+	if s := strings.TrimSpace(q.Get("q")); s != "" {
+		p.Q = s
+		p.MinScore = 0
+		p.From, p.To = "", ""
 	}
 
 	list, err := h.Jobs.ListLite(r.Context(), p)
@@ -176,7 +188,8 @@ func (h *JobUIHandler) JobSummary(w http.ResponseWriter, r *http.Request) {
 	h.Renderer.HTML(w, http.StatusOK, "job_summary", toSummaryView(*j, profile))
 }
 
-// RowStatus handles POST /ui/jobs/{id}/row-status — apply/skip/interview. It
+// RowStatus handles POST /ui/jobs/{id}/row-status — a review transition (a stage
+// like applied/screen/interview/skipped, or an outcome like rejected/offer). It
 // upserts job_review, then renders the refreshed summary plus an OOB row.
 func (h *JobUIHandler) RowStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -225,6 +238,9 @@ func toRowView(j jobs.Job, profile string) jobRowView {
 	}
 	if j.Application != nil {
 		v.Status = j.Application.Status
+		if j.Application.FinalStatus != nil {
+			v.Final = *j.Application.FinalStatus
+		}
 	}
 	return v
 }
@@ -247,6 +263,9 @@ func toSummaryView(j jobs.Job, profile string) jobSummaryView {
 	}
 	if j.Application != nil {
 		v.Status = j.Application.Status
+		if j.Application.FinalStatus != nil {
+			v.Final = *j.Application.FinalStatus
+		}
 	}
 	if c := j.Compensation; c != nil && c.Min != nil && c.Max != nil {
 		v.Compensation = strconv.FormatInt(*c.Min, 10) + "–" + strconv.FormatInt(*c.Max, 10)

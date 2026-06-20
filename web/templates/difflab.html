@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>diff lab {{ .Variant }} — résumé</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <style>
   body { font: 14px/1.45 system-ui, sans-serif; max-width: 1500px; margin: 1rem auto; padding: 0 1rem; color: #222; }
   h1 { font-size: 19px; margin: 0 0 .2rem; }
@@ -64,6 +65,24 @@
   #cm .cm-spacer { background: repeating-linear-gradient(45deg, #f4f4f5, #f4f4f5 6px, #fbfbfc 6px, #fbfbfc 12px); }
   .cm-note { font-size: 12px; color: #888; margin-top: .4rem; }
 
+  /* ── v4: zero-JS server-rendered diff ── */
+  .dl4-edit { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; align-items: start; margin-bottom: .5rem; }
+  .dl4-edit .md { height: 30vh; }
+  .dl4-note { font-size: 12px; color: #888; margin: .1rem 0 .5rem; }
+  .dl4-diff { border: 1px solid #ccc; border-radius: 5px; overflow: auto; max-height: 52vh; }
+  .dl4-diff.htmx-request { opacity: .55; transition: opacity .12s; }
+  table.dl4-table { width: 100%; border-collapse: collapse; table-layout: fixed;
+                    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  table.dl4-table td.dlc { width: 50%; vertical-align: top; padding: 0 .5rem; min-height: 1.5em;
+                           white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+  table.dl4-table td.dlc:first-child { border-right: 1px solid #ddd; }
+  .dl-del { background: #ffe9eb; }
+  .dl-add { background: #e9f8ee; }
+  .dl-chg { background: #fff8e0; }
+  .dl-blank { background: repeating-linear-gradient(45deg, #f4f4f5, #f4f4f5 6px, #fbfbfc 6px, #fbfbfc 12px); }
+  table.dl4-table td:first-child .d { background: #ffc9cf; text-decoration: line-through; }
+  table.dl4-table td:last-child .d  { background: #a9efc1; }
+
   /* ── v3: on-demand compare panel ── */
   .compare-out { margin-top: .9rem; }
   .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
@@ -80,7 +99,7 @@
   <div class="sub">
     Left = your <b>master résumé</b> (edit &amp; <b>save permanently</b>). Right = the version tailored for
     <b>{{ if .JobTitle }}{{ .JobTitle }}{{ else }}this job{{ end }}</b>.
-    Compare highlighting styles: <a href="/v1">/v1</a> · <a href="/v2">/v2</a> · <a href="/v3">/v3</a>
+    Compare highlighting styles: <a href="/v1">/v1</a> · <a href="/v2">/v2</a> · <a href="/v3">/v3</a> · <a href="/v4">/v4</a> <b>(zero-JS)</b>
   </div>
 
   <div class="actions">
@@ -106,6 +125,28 @@
   <div class="cm-note">CodeMirror editors with a line-level diff — both sides editable, highlights update live. Loads the editor from a CDN (needs internet).</div>
   <textarea id="left" hidden>{{ .MasterMarkdown }}</textarea>
   <textarea id="right" hidden>{{ .JobMarkdown }}</textarea>
+  {{- else if eq .Variant "v4" }}
+  {{- /* Zero-JS diff: edit either textarea, htmx posts both panes to
+         /ui/difflab/diff (debounced) and swaps the server-rendered, line-aligned
+         diff below. No editor JS, no CodeMirror CDN — the diff is computed in Go
+         (package resumediff). The shared difflab.js still reads #left/#right for
+         save / PDF / version-restore. */ -}}
+  <form id="v4form" class="dl4-edit">
+    <div class="col">
+      <div class="col-head"><b>Master résumé</b> — saved permanently</div>
+      <textarea id="left" name="left" class="md" spellcheck="false"
+                hx-post="/ui/difflab/diff" hx-include="#v4form" hx-target="#v4-diff"
+                hx-swap="innerHTML" hx-trigger="input changed delay:500ms">{{ .MasterMarkdown }}</textarea>
+    </div>
+    <div class="col">
+      <div class="col-head"><b>This job</b> — saved for this job only</div>
+      <textarea id="right" name="right" class="md" spellcheck="false"
+                hx-post="/ui/difflab/diff" hx-include="#v4form" hx-target="#v4-diff"
+                hx-swap="innerHTML" hx-trigger="input changed delay:500ms">{{ .JobMarkdown }}</textarea>
+    </div>
+  </form>
+  <div class="dl4-note">Edit either side; the aligned diff refreshes ~½s after you stop typing — rendered entirely server-side (no editor JS, no CodeMirror CDN).</div>
+  <div id="v4-diff" class="dl4-diff">{{ template "difflab_diff" .DiffRows }}</div>
   {{- else }}
   <div class="lab">
     <div class="col">

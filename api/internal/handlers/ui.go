@@ -21,6 +21,7 @@ type statusRowView struct {
 	JobID      string
 	SysProfile string
 	Status     string
+	Final      string // "" == still open; else terminal outcome (rejected/offer)
 	Notes      string
 	UpdatedAt  string
 }
@@ -59,6 +60,9 @@ func (h *UIHandler) StatusRow(w http.ResponseWriter, r *http.Request) {
 		SysProfile: app.SysProfile,
 		Status:     app.Status,
 		UpdatedAt:  app.UpdatedAt,
+	}
+	if app.FinalStatus != nil {
+		view.Final = *app.FinalStatus
 	}
 	if app.Notes != nil {
 		view.Notes = *app.Notes

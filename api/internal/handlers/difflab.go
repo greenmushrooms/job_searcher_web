@@ -10,19 +10,25 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resumediff"
 )
 
 // diffLabView feeds web/templates/difflab.html — a standalone two-pane résumé
-// diff sandbox served at /v1, /v2, /v3. The three variants are identical except
-// for how they highlight differences (overlay / CodeMirror / on-demand compare),
-// so they can be compared side by side before one is chosen.
+// diff sandbox served at /v1, /v2, /v3, /v4. The variants are identical except
+// for how they highlight differences (overlay / CodeMirror / on-demand compare /
+// zero-JS server-rendered), so they can be compared side by side before one is
+// chosen.
 type diffLabView struct {
-	Variant        string // "v1" | "v2" | "v3"
+	Variant        string // "v1" | "v2" | "v3" | "v4"
 	JobID          string
 	Profile        string
 	JobTitle       string
 	MasterMarkdown string // left pane — the permanent master résumé
 	JobMarkdown    string // right pane — the version tailored for this job
+
+	// DiffRows is the server-computed, line-aligned diff used by the zero-JS v4
+	// variant for its initial render (recompute-on-edit posts to DiffLabCompute).
+	DiffRows []resumediff.RenderRow
 }
 
 // DiffLab renders the diff-lab page for a given highlighting variant. ?job=<id>
@@ -44,7 +50,22 @@ func (h *ResumeHandler) DiffLab(w http.ResponseWriter, r *http.Request, variant 
 		MasterMarkdown: master,
 		JobMarkdown:    h.jobMarkdown(r.Context(), jobID, profile, master),
 	}
+	if variant == "v4" {
+		view.DiffRows = resumediff.Render(view.MasterMarkdown, view.JobMarkdown)
+	}
 	h.Renderer.HTML(w, http.StatusOK, "difflab", view)
+}
+
+// DiffLabCompute handles POST /ui/difflab/diff — the zero-JS v4 lab posts both
+// panes here (debounced, on edit) and swaps in the freshly rendered, line-aligned
+// diff. No client-side diff logic: the algorithm lives in package resumediff.
+func (h *ResumeHandler) DiffLabCompute(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	rows := resumediff.Render(r.FormValue("left"), r.FormValue("right"))
+	h.Renderer.HTML(w, http.StatusOK, "difflab_diff", rows)
 }
 
 // SaveMaster handles POST /ui/resume/master — persist the left pane's markdown

@@ -17,9 +17,10 @@ type Compensation struct {
 }
 
 type Application struct {
-	Status    string  `json:"status"`
-	Notes     *string `json:"notes"`
-	UpdatedAt string  `json:"updated_at"`
+	Status      string  `json:"status"`
+	FinalStatus *string `json:"final_status"` // nil = still open / no outcome yet
+	Notes       *string `json:"notes"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 type Job struct {
@@ -50,8 +51,14 @@ type ListParams struct {
 	To        string // YYYY-MM-DD, optional
 	DateField string // "eval" or "posted"
 	// Status filters by review decision: "" = all, "inbox" = no decision yet,
-	// otherwise an exact job_review.status (applied/skipped/interview).
+	// "rejected"/"offer" match the terminal outcome (job_review.final_status),
+	// otherwise an exact active stage (job_review.status: applied/screen/
+	// interview/skipped).
 	Status string
+	// Q is a free-text search over title/company/location (email-style). When
+	// set, the handler relaxes the score floor and date window so a match
+	// surfaces regardless of how it scored or when it was evaluated.
+	Q string
 }
 
 const baseSelect = `
@@ -63,7 +70,7 @@ SELECT
     j.min_amount, j.max_amount, j.interval, j.currency,
     e.avg_score, e.reasoning, e.created_at::text AS eval_date,
     e.sys_profile, j.sys_country,
-    a.status, a.notes, a.updated_at::text AS application_updated_at,
+    a.status, a.final_status, a.notes, a.updated_at::text AS application_updated_at,
     EXISTS (
         SELECT 1 FROM web.jobs_resume jr
         WHERE jr.job_id = j.id AND jr.sys_profile = e.sys_profile
@@ -84,7 +91,7 @@ SELECT
     j.id, j.title, j.company, j.location, j.is_remote,
     e.avg_score, e.created_at::text AS eval_date,
     e.sys_profile,
-    a.status,
+    a.status, a.final_status,
     EXISTS (
         SELECT 1 FROM web.jobs_resume jr
         WHERE jr.job_id = j.id AND jr.sys_profile = e.sys_profile
@@ -126,9 +133,18 @@ func listSuffix(p ListParams) (string, []any) {
 		// all
 	case "inbox":
 		where = append(where, "a.status IS NULL")
+	case "rejected", "offer":
+		args = append(args, p.Status)
+		where = append(where, "a.final_status = $"+strconv.Itoa(len(args)))
 	default:
 		args = append(args, p.Status)
 		where = append(where, "a.status = $"+strconv.Itoa(len(args)))
+	}
+
+	if p.Q != "" {
+		args = append(args, "%"+p.Q+"%")
+		idx := "$" + strconv.Itoa(len(args))
+		where = append(where, "(j.title ILIKE "+idx+" OR j.company ILIKE "+idx+" OR j.location ILIKE "+idx+")")
 	}
 
 	args = append(args, p.Limit, p.Offset)
@@ -160,19 +176,20 @@ func (r *Repo) ListLite(ctx context.Context, p ListParams) ([]Job, error) {
 	var out []Job
 	for rows.Next() {
 		var (
-			j       Job
-			score   *float64
-			appStat *string
+			j        Job
+			score    *float64
+			appStat  *string
+			appFinal *string
 		)
 		if err := rows.Scan(
 			&j.ID, &j.Title, &j.Company, &j.Location, &j.IsRemote,
-			&score, &j.EvalDate, &j.Profile, &appStat, &j.HasResume,
+			&score, &j.EvalDate, &j.Profile, &appStat, &appFinal, &j.HasResume,
 		); err != nil {
 			return nil, err
 		}
 		j.Score = score
 		if appStat != nil {
-			j.Application = &Application{Status: *appStat}
+			j.Application = &Application{Status: *appStat, FinalStatus: appFinal}
 		}
 		out = append(out, j)
 	}
@@ -233,6 +250,7 @@ func (r *Repo) queryJobs(ctx context.Context, sql string, args ...any) ([]Job, e
 			reason    []byte
 			score     *float64
 			appStat   *string
+			appFinal  *string
 			appNotes  *string
 			appUpd    *string
 		)
@@ -242,7 +260,7 @@ func (r *Repo) queryJobs(ctx context.Context, sql string, args ...any) ([]Job, e
 			&minAmtStr, &maxAmtStr, &interval, &currency,
 			&score, &reason, &j.EvalDate,
 			&j.Profile, &j.Country,
-			&appStat, &appNotes, &appUpd,
+			&appStat, &appFinal, &appNotes, &appUpd,
 			&j.HasResume,
 		); err != nil {
 			return nil, err
@@ -261,7 +279,7 @@ func (r *Repo) queryJobs(ctx context.Context, sql string, args ...any) ([]Job, e
 			if appUpd != nil {
 				updatedAt = *appUpd
 			}
-			j.Application = &Application{Status: *appStat, Notes: appNotes, UpdatedAt: updatedAt}
+			j.Application = &Application{Status: *appStat, FinalStatus: appFinal, Notes: appNotes, UpdatedAt: updatedAt}
 		}
 		out = append(out, j)
 	}

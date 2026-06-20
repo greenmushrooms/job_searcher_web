@@ -14,6 +14,9 @@
   button.small { padding: .2rem .5rem; font-size: 12px; }
   button.secondary { background: #b00020; } button.secondary:hover { background: #8a0019; }
   button.alt { background: #0a7d2e; } button.alt:hover { background: #086324; }
+  button.info { background: #0e7490; } button.info:hover { background: #0b5c73; }
+  button.warn { background: #b07d00; } button.warn:hover { background: #8a6200; }
+  button.danger { background: #7a1020; } button.danger:hover { background: #5e0c19; }
 
   .layout { display: grid; grid-template-columns: 380px 1fr; gap: .9rem; align-items: start; }
   @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
@@ -26,6 +29,9 @@
 
   /* filter bar above the list */
   .filters { display: flex; flex-direction: column; gap: .45rem; margin-bottom: .55rem; }
+  .job-search { width: 100%; box-sizing: border-box; padding: .45rem .65rem; font: inherit; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+  .job-search::placeholder { color: #999; }
+  .job-search:focus { outline: none; border-color: #1a4ed8; box-shadow: 0 0 0 2px rgba(26,78,216,.12); }
   .filter-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; font-size: 12px; color: #555; }
   .filter-row select, .filter-row input[type=number] { font: inherit; padding: .15rem .25rem; border: 1px solid #ccc; border-radius: 4px; }
   .filter-row input[type=number] { width: 4.2em; }
@@ -47,6 +53,8 @@
   .jr-badge { width: 14px; flex: 0 0 14px; text-align: center; font-size: 13px; }
   .jr-applied { color: #0a7d2e; } .jr-skipped { color: #b00020; }
   .jr-interview { color: #b07d00; } .jr-unread { color: #1a4ed8; }
+  .jr-screen { color: #0e7490; } .jr-offer { color: #0a7d2e; font-weight: 700; }
+  .jr-rejected { color: #7a1020; }
   .jr-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .jr-doc { flex: 0 0 auto; font-size: 12px; }
   .jr-score { color: #0a7d2e; font-weight: 600; font-size: 12px; }
@@ -62,8 +70,12 @@
   .js-meta { color: #666; font-size: 12px; margin: .3rem 0 .7rem; }
   .js-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .03em; margin: .5rem 0 .15rem; }
   .js-text { font-size: 13px; line-height: 1.55; color: #333; }
-  .js-actions { display: flex; gap: .5rem; align-items: center; margin-top: 1.1rem; padding-top: .8rem; border-top: 1px solid #eee; }
-  .js-status { color: #555; font-size: 12px; margin-right: auto; }
+  .js-actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.1rem; padding-top: .8rem; border-top: 1px solid #eee; }
+  .js-status { color: #555; font-size: 12px; }
+  .js-final { text-transform: capitalize; } .js-final-rejected { color: #7a1020; } .js-final-offer { color: #0a7d2e; }
+  .js-btns { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+  .js-btns-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #aaa; margin-left: .3rem; }
+  .js-btns-label:first-child { margin-left: 0; }
 
   /* tailoring draft + bullet diff */
   .draft-meta { display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; font-size: 11px; color: #666; margin: .2rem 0 .8rem; padding-bottom: .5rem; border-bottom: 1px solid #eee; }
@@ -153,7 +165,7 @@
 </head>
 <body>
   <h1>jobs</h1>
-  <div class="sub"><b>Unread</b> = no apply/skip decision yet · 📄 = résumé saved. Filters reload the list; default range is the last 2 weeks.</div>
+  <div class="sub"><b>Unread</b> = no apply/skip decision yet · 📄 = résumé saved. Filters reload the list; default range is the last 2 weeks. <b>Search</b> finds any job by title/company/location across all scores &amp; dates.</div>
 
   <div id="error-banner" role="alert">
     <span class="eb-msg"></span>
@@ -164,14 +176,19 @@
     <div class="list-col">
       <form id="job-filters" class="filters"
             hx-get="/ui/jobs" hx-target="#job-list-wrap" hx-swap="innerHTML"
-            hx-trigger="load, change">
+            hx-trigger="load, change, keyup changed delay:350ms from:.job-search, search from:.job-search">
         <input type="hidden" name="profile" value="Slava">
+        <input type="search" name="q" class="job-search" autocomplete="off"
+               placeholder="🔍  Search all jobs — title, company or location (ignores score &amp; date filters)">
         <div class="status-tabs">
           <label><input type="radio" name="status" value="" checked>All</label>
           <label><input type="radio" name="status" value="inbox">Inbox</label>
           <label><input type="radio" name="status" value="applied">Applied</label>
+          <label><input type="radio" name="status" value="screen">Screen</label>
           <label><input type="radio" name="status" value="interview">Interview</label>
           <label><input type="radio" name="status" value="skipped">Skipped</label>
+          <label><input type="radio" name="status" value="offer">Offer</label>
+          <label><input type="radio" name="status" value="rejected">Rejected</label>
         </div>
         <div class="filter-row">
           <label>since
