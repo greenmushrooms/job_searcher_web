@@ -7,3 +7,5 @@ api/cmd/server/server
 *.log
 .DS_Store
 .venv
+# local Claude Code settings + ad-hoc résumé SQL backups — machine-local
+.claude/
