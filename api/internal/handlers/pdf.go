@@ -37,11 +37,11 @@ func (h *ResumeHandler) ResumePDF(w http.ResponseWriter, r *http.Request) {
 
 	saved, err := h.Finalizations.Get(r.Context(), jobID, profile)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if saved == nil || strings.TrimSpace(saved.Markdown) == "" {
-		http.Error(w, "no saved resume for this job — click Save résumé first", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "no saved resume for this job — click Save résumé first")
 		return
 	}
 	name := nameFromMarkdown(saved.Markdown)
@@ -58,7 +58,7 @@ func (h *ResumeHandler) GeneratePDF(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	saved, _, _, herr := h.saveResumeFromForm(r, jobID)
 	if herr != nil {
-		http.Error(w, herr.msg, herr.status)
+		writeErr(w, herr.status, herr.msg)
 		return
 	}
 	name := nameFromMarkdown(saved.Markdown)
@@ -88,20 +88,20 @@ func (h *ResumeHandler) proxyPDF(w http.ResponseWriter, r *http.Request, path st
 	}
 	req, err := http.NewRequestWithContext(r.Context(), "POST", url, bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := pdfHTTPClient.Do(req)
 	if err != nil {
-		http.Error(w, "resume_htmx unreachable at "+resumeHTMXURL()+": "+err.Error(), http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, "resume_htmx unreachable at "+resumeHTMXURL()+": "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
-		http.Error(w, fmt.Sprintf("resume_htmx render failed (%d): %s", resp.StatusCode, msg), http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, fmt.Sprintf("resume_htmx render failed (%d): %s", resp.StatusCode, msg))
 		return
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/finalizations"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
@@ -239,7 +240,7 @@ func (h *ResumeHandler) GenerateResume(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	saved, profile, templateID, herr := h.saveResumeFromForm(r, jobID)
 	if herr != nil {
-		http.Error(w, herr.msg, herr.status)
+		writeErr(w, herr.status, herr.msg)
 		return
 	}
 	view := generateResultView{
@@ -335,24 +336,24 @@ type templateSavedView struct {
 func (h *ResumeHandler) SaveTemplate(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 	name := strings.TrimSpace(r.FormValue("name"))
 	if name == "" {
-		http.Error(w, "template name required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "template name required")
 		return
 	}
 	markdown := r.FormValue("markdown")
 	if strings.TrimSpace(markdown) == "" {
-		http.Error(w, "empty resume markdown", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "empty resume markdown")
 		return
 	}
 
 	id, err := h.Templates.SaveMarkdown(r.Context(), profile, name, markdown)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.templateSavedEvent(r.Context(), profile, jobID, id, name)
@@ -366,22 +367,22 @@ func (h *ResumeHandler) SaveTemplate(w http.ResponseWriter, r *http.Request) {
 func (h *ResumeHandler) ReplaceTemplate(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 	id := r.FormValue("target_template")
 	if id == "" || id == resume.DefaultTemplateID {
-		http.Error(w, "choose a template to replace", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "choose a template to replace")
 		return
 	}
 	markdown := r.FormValue("markdown")
 	if strings.TrimSpace(markdown) == "" {
-		http.Error(w, "empty resume markdown", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "empty resume markdown")
 		return
 	}
 	if err := h.Templates.ReplaceMarkdown(r.Context(), profile, id, markdown); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	name := id
@@ -397,17 +398,14 @@ func (h *ResumeHandler) ReplaceTemplate(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *ResumeHandler) templateSavedEvent(ctx context.Context, profile, jobID, id, name string) {
-	payload, _ := json.Marshal(map[string]string{"template_id": id, "name": name})
-	_, _ = h.Pool.Exec(ctx, `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'resume_template_saved', $3::jsonb)
-    `, profile, jobID, payload)
+	_ = db.WriteEvent(ctx, h.Pool, profile, jobID, "resume_template_saved",
+		map[string]string{"template_id": id, "name": name})
 }
 
 func (h *ResumeHandler) renderTemplateSaved(w http.ResponseWriter, r *http.Request, jobID, profile, id, name string) {
 	controls, err := resumeControls(r.Context(), h.Templates, jobID, profile, id, true)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "template_saved", templateSavedView{
@@ -438,7 +436,7 @@ func (h *ResumeHandler) TemplatesManager(w http.ResponseWriter, r *http.Request)
 	jobID := r.URL.Query().Get("job")
 	list, err := h.Templates.List(r.Context(), profile)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "template_manager", templateManagerView{
@@ -470,19 +468,19 @@ func (h *ResumeHandler) SetDefaultTemplate(w http.ResponseWriter, r *http.Reques
 // with an OOB dropdown refresh when a job is open.
 func (h *ResumeHandler) templateMutation(w http.ResponseWriter, r *http.Request, mutate func(context.Context, string, string) error) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 	id := chi.URLParam(r, "templateID")
 	jobID := r.FormValue("job")
 	if err := mutate(r.Context(), profile, id); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	list, err := h.Templates.List(r.Context(), profile)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	view := templateManagerView{JobID: jobID, Profile: profile, Templates: list}
@@ -621,12 +619,12 @@ func (h *ResumeHandler) DraftFragment(w http.ResponseWriter, r *http.Request) {
 
 	payload, draftedAt, err := h.latestDraftEvent(r.Context(), jobID, profile)
 	if err != nil {
-		http.Error(w, "load draft: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "load draft: "+err.Error())
 		return
 	}
 	view, herr := h.markdownFragment(r.Context(), jobID, profile, templateID, "", "", payload, draftedAt)
 	if herr != nil {
-		http.Error(w, herr.msg, herr.status)
+		writeErr(w, herr.status, herr.msg)
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "draft_fragment", view)
@@ -642,13 +640,13 @@ func (h *ResumeHandler) DraftFragmentTrigger(w http.ResponseWriter, r *http.Requ
 
 	draft, res, _, herr := h.draftAndPersist(r.Context(), jobID, profile, templateID)
 	if herr != nil {
-		http.Error(w, herr.msg, herr.status)
+		writeErr(w, herr.status, herr.msg)
 		return
 	}
 	payload := draftEventPayload(draft, res)
 	view, herr := h.markdownFragment(r.Context(), jobID, profile, templateID, r.FormValue("markdown"), "", payload, "just now")
 	if herr != nil {
-		http.Error(w, herr.msg, herr.status)
+		writeErr(w, herr.status, herr.msg)
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "draft_fragment", view)
@@ -665,11 +663,11 @@ func (h *ResumeHandler) ApplyAI(w http.ResponseWriter, r *http.Request) {
 
 	payload, draftedAt, err := h.latestDraftEvent(r.Context(), jobID, profile)
 	if err != nil {
-		http.Error(w, "load draft: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "load draft: "+err.Error())
 		return
 	}
 	if payload == nil {
-		http.Error(w, "no draft to apply — click Draft with AI first", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "no draft to apply — click Draft with AI first")
 		return
 	}
 	// The edited right pane becomes both the new working copy (left) and the
@@ -677,7 +675,7 @@ func (h *ResumeHandler) ApplyAI(w http.ResponseWriter, r *http.Request) {
 	tailored := r.FormValue("tailored")
 	view, herr := h.markdownFragment(r.Context(), jobID, profile, templateID, tailored, tailored, payload, draftedAt)
 	if herr != nil {
-		http.Error(w, herr.msg, herr.status)
+		writeErr(w, herr.status, herr.msg)
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "draft_fragment", view)
@@ -838,7 +836,7 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		draft.Rewrites = keptRewrites(draft.Rewrites, sel)
 	}
 
-	payload, _ := json.Marshal(map[string]any{
+	eventErr := db.WriteEvent(ctx, h.Pool, profile, jobID, "resume_drafted", map[string]any{
 		"prompt_version":      draft.PromptVersion,
 		"scorer_version":      deepseek.ScorerVersion,
 		"relevance_threshold": resumesuggest.DefaultThreshold,
@@ -855,10 +853,6 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		"education_removals":  draft.EducationRemovals,
 		"scores":              scores,
 	})
-	_, eventErr := h.Pool.Exec(ctx, `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'resume_drafted', $3::jsonb)
-    `, profile, jobID, string(payload))
 
 	return draft, res, eventErr, nil
 }

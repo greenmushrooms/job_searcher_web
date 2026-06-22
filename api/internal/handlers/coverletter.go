@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
 )
@@ -34,7 +34,7 @@ func (h *ResumeHandler) CoverLetterFragment(w http.ResponseWriter, r *http.Reque
 	view := coverLetterView{JobID: jobID, Profile: profile}
 	cl, err := h.CoverLetters.Get(r.Context(), jobID, profile)
 	if err != nil {
-		http.Error(w, "load cover letter: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "load cover letter: "+err.Error())
 		return
 	}
 	if cl != nil {
@@ -51,23 +51,23 @@ func (h *ResumeHandler) CoverLetterFragment(w http.ResponseWriter, r *http.Reque
 func (h *ResumeHandler) SaveCoverLetter(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 	body := r.FormValue("body")
 	if strings.TrimSpace(body) == "" {
-		http.Error(w, "empty cover letter", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "empty cover letter")
 		return
 	}
 
 	exists, err := h.jobExists(r.Context(), jobID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !exists {
-		http.Error(w, "job not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	}
 
@@ -75,7 +75,7 @@ func (h *ResumeHandler) SaveCoverLetter(w http.ResponseWriter, r *http.Request) 
 	// erase which model wrote it.
 	saved, err := h.CoverLetters.Save(r.Context(), jobID, profile, body, "")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "cover_letter", coverLetterView{
@@ -98,27 +98,27 @@ func (h *ResumeHandler) SaveCoverLetter(w http.ResponseWriter, r *http.Request) 
 func (h *ResumeHandler) CoverLetterPDF(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 	body := r.FormValue("body")
 	if strings.TrimSpace(body) == "" {
-		http.Error(w, "empty cover letter", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "empty cover letter")
 		return
 	}
 
 	exists, err := h.jobExists(r.Context(), jobID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !exists {
-		http.Error(w, "job not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	}
 	if _, err := h.CoverLetters.Save(r.Context(), jobID, profile, body, ""); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -159,32 +159,32 @@ func (h *ResumeHandler) letterhead(ctx context.Context, profile string) (name, c
 func (h *ResumeHandler) DraftCoverLetter(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 
 	if h.DeepSeek == nil {
-		http.Error(w, "DeepSeek not configured (set DEEPSEEK_API_KEY)", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "DeepSeek not configured (set DEEPSEEK_API_KEY)")
 		return
 	}
 	job, err := h.Jobs.Get(r.Context(), jobID)
 	if err != nil {
-		http.Error(w, "job lookup: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "job lookup: "+err.Error())
 		return
 	}
 	if job == nil {
-		http.Error(w, "job not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	}
 	if job.Description == nil || *job.Description == "" {
-		http.Error(w, "job has no description to write against", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "job has no description to write against")
 		return
 	}
 
 	resumeMD, herr := h.resumeMarkdownFor(r.Context(), jobID, profile)
 	if herr != nil {
-		http.Error(w, herr.msg, herr.status)
+		writeErr(w, herr.status, herr.msg)
 		return
 	}
 
@@ -197,12 +197,12 @@ func (h *ResumeHandler) DraftCoverLetter(w http.ResponseWriter, r *http.Request)
 	}
 	result, err := h.DeepSeek.CoverLetter(r.Context(), title, company, *job.Description, resumeMD)
 	if err != nil {
-		http.Error(w, "deepseek: "+err.Error(), http.StatusBadGateway)
+		writeErr(w, http.StatusBadGateway, "deepseek: "+err.Error())
 		return
 	}
 
 	// Audit trail with cost telemetry, same shape as resume_drafted.
-	payload, _ := json.Marshal(map[string]any{
+	_ = db.WriteEvent(r.Context(), h.Pool, profile, jobID, "cover_letter_drafted", map[string]any{
 		"prompt_version":    result.PromptVersion,
 		"model":             result.Model,
 		"prompt_tokens":     result.Usage.PromptTokens,
@@ -210,10 +210,6 @@ func (h *ResumeHandler) DraftCoverLetter(w http.ResponseWriter, r *http.Request)
 		"total_tokens":      result.Usage.TotalTokens,
 		"cost_usd":          result.Usage.CostUSD,
 	})
-	_, _ = h.Pool.Exec(r.Context(), `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'cover_letter_drafted', $3::jsonb)
-    `, profile, jobID, string(payload))
 
 	h.Renderer.HTML(w, http.StatusOK, "cover_letter", coverLetterView{
 		JobID:     jobID,

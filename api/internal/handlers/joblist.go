@@ -28,12 +28,12 @@ type JobUIHandler struct {
 }
 
 type jobRowView struct {
-	ID       string
-	Profile  string
-	Title    string
-	Company  string
-	Location string
-	IsRemote bool
+	ID        string
+	Profile   string
+	Title     string
+	Company   string
+	Location  string
+	IsRemote  bool
 	Score     string
 	EvalDate  string
 	Status    string // "" == unread (no decision yet)
@@ -125,7 +125,7 @@ func (h *JobUIHandler) JobList(w http.ResponseWriter, r *http.Request) {
 
 	list, err := h.Jobs.ListLite(r.Context(), p)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	view := jobListView{Profile: profile}
@@ -152,16 +152,16 @@ func (h *JobUIHandler) JobWorkspace(w http.ResponseWriter, r *http.Request) {
 	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
 	j, err := h.Jobs.Get(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if j == nil {
-		http.Error(w, "job not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	}
 	controls, err := resumeControls(r.Context(), h.Templates, id, profile, "", false)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "job_workspace", jobWorkspaceView{
@@ -178,11 +178,11 @@ func (h *JobUIHandler) JobSummary(w http.ResponseWriter, r *http.Request) {
 	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
 	j, err := h.Jobs.Get(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if j == nil {
-		http.Error(w, "job not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "job_summary", toSummaryView(*j, profile))
@@ -199,19 +199,19 @@ func (h *JobUIHandler) RowStatus(w http.ResponseWriter, r *http.Request) {
 	_, err := h.Apps.Upsert(r.Context(), id, profile, status, nil)
 	switch {
 	case errors.Is(err, applications.ErrInvalidStatus):
-		http.Error(w, "invalid status", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid status")
 		return
 	case errors.Is(err, applications.ErrJobNotFound):
-		http.Error(w, "job not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	case err != nil:
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	j, err := h.Jobs.Get(r.Context(), id)
 	if err != nil || j == nil {
-		http.Error(w, "reload job after status change", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "reload job after status change")
 		return
 	}
 	row := toRowView(*j, profile)

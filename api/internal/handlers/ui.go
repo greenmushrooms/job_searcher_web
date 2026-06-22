@@ -45,13 +45,13 @@ func (h *UIHandler) StatusRow(w http.ResponseWriter, r *http.Request) {
 	app, err := h.Repo.Upsert(r.Context(), jobID, profile, status, notes)
 	switch {
 	case errors.Is(err, applications.ErrInvalidStatus):
-		http.Error(w, "invalid status", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid status")
 		return
 	case errors.Is(err, applications.ErrJobNotFound):
-		http.Error(w, "job not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "job not found")
 		return
 	case err != nil:
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

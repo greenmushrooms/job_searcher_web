@@ -233,8 +233,11 @@
     function show(text) { msg.textContent = text; banner.classList.add('show'); }
     document.body.addEventListener('htmx:responseError', function (e) {
       var x = e.detail.xhr;
-      var body = (x.responseText || '').trim().slice(0, 300);
-      show('Request failed (' + x.status + '): ' + (body || x.statusText));
+      var raw = (x.responseText || '').trim();
+      // Handlers return JSON errors ({"error": "..."}); fall back to raw text.
+      var text = raw;
+      try { var j = JSON.parse(raw); if (j && j.error) text = j.error; } catch (_) {}
+      show('Request failed (' + x.status + '): ' + (text.slice(0, 300) || x.statusText));
     });
     document.body.addEventListener('htmx:sendError', function () {
       show('Network error — is the server running?');

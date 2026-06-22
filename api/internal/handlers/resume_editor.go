@@ -42,7 +42,7 @@ func (h *ResumeHandler) ResumeEditor(w http.ResponseWriter, r *http.Request) {
 	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
 	view, err := h.buildEditorView(r, profile)
 	if err != nil {
-		http.Error(w, "resume load: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "resume load: "+err.Error())
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "resume_editor", view)
@@ -56,7 +56,7 @@ func (h *ResumeHandler) SaveBullet(w http.ResponseWriter, r *http.Request) {
 	text := r.FormValue("text")
 
 	if err := h.Resumes.UpsertBulletText(r.Context(), profile, roleID, bulletID, text); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "resume_bullet", resumeBulletEditView{
@@ -73,7 +73,7 @@ func (h *ResumeHandler) AddBullet(w http.ResponseWriter, r *http.Request) {
 
 	bulletID, err := h.Resumes.AddBullet(r.Context(), profile, roleID, text)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	h.Renderer.HTML(w, http.StatusOK, "resume_bullet", resumeBulletEditView{
@@ -89,7 +89,7 @@ func (h *ResumeHandler) RemoveBullet(w http.ResponseWriter, r *http.Request) {
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 
 	if err := h.Resumes.RetireBullet(r.Context(), profile, roleID, bulletID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Empty 200 body + hx-swap=outerHTML on the caller removes the row.

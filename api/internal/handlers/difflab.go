@@ -61,7 +61,7 @@ func (h *ResumeHandler) DiffLab(w http.ResponseWriter, r *http.Request, variant 
 // diff. No client-side diff logic: the algorithm lives in package resumediff.
 func (h *ResumeHandler) DiffLabCompute(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	rows := resumediff.Render(r.FormValue("left"), r.FormValue("right"))
@@ -73,21 +73,21 @@ func (h *ResumeHandler) DiffLabCompute(w http.ResponseWriter, r *http.Request) {
 // page surfaces as a toast.
 func (h *ResumeHandler) SaveMaster(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "bad form")
 		return
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 	md := r.FormValue("markdown")
 	if strings.TrimSpace(md) == "" {
-		http.Error(w, "empty résumé markdown", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "empty résumé markdown")
 		return
 	}
 	if h.Master == nil {
-		http.Error(w, "master résumé store not configured", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "master résumé store not configured")
 		return
 	}
 	if err := h.Master.Save(r.Context(), profile, md); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
