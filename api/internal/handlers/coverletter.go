@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
 )
@@ -202,7 +202,7 @@ func (h *ResumeHandler) DraftCoverLetter(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Audit trail with cost telemetry, same shape as resume_drafted.
-	payload, _ := json.Marshal(map[string]any{
+	_ = db.WriteEvent(r.Context(), h.Pool, profile, jobID, "cover_letter_drafted", map[string]any{
 		"prompt_version":    result.PromptVersion,
 		"model":             result.Model,
 		"prompt_tokens":     result.Usage.PromptTokens,
@@ -210,10 +210,6 @@ func (h *ResumeHandler) DraftCoverLetter(w http.ResponseWriter, r *http.Request)
 		"total_tokens":      result.Usage.TotalTokens,
 		"cost_usd":          result.Usage.CostUSD,
 	})
-	_, _ = h.Pool.Exec(r.Context(), `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'cover_letter_drafted', $3::jsonb)
-    `, profile, jobID, string(payload))
 
 	h.Renderer.HTML(w, http.StatusOK, "cover_letter", coverLetterView{
 		JobID:     jobID,

@@ -6,7 +6,6 @@ package coverletters
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -53,15 +52,11 @@ func (r *Repo) Save(ctx context.Context, jobID, sysProfile, body, model string) 
 		return nil, fmt.Errorf("upsert jobs_cover_letter: %w", err)
 	}
 
-	payload, _ := json.Marshal(map[string]any{
+	if err := db.WriteEvent(ctx, r.q, sysProfile, jobID, "cover_letter_saved", map[string]any{
 		"model":      cl.Model,
 		"body_chars": len(body),
-	})
-	if _, err := r.q.Exec(ctx, `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'cover_letter_saved', $3::jsonb)
-    `, sysProfile, jobID, string(payload)); err != nil {
-		return nil, fmt.Errorf("write event: %w", err)
+	}); err != nil {
+		return nil, err
 	}
 	return &cl, nil
 }

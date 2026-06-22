@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/finalizations"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
@@ -397,11 +398,8 @@ func (h *ResumeHandler) ReplaceTemplate(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *ResumeHandler) templateSavedEvent(ctx context.Context, profile, jobID, id, name string) {
-	payload, _ := json.Marshal(map[string]string{"template_id": id, "name": name})
-	_, _ = h.Pool.Exec(ctx, `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'resume_template_saved', $3::jsonb)
-    `, profile, jobID, payload)
+	_ = db.WriteEvent(ctx, h.Pool, profile, jobID, "resume_template_saved",
+		map[string]string{"template_id": id, "name": name})
 }
 
 func (h *ResumeHandler) renderTemplateSaved(w http.ResponseWriter, r *http.Request, jobID, profile, id, name string) {
@@ -838,7 +836,7 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		draft.Rewrites = keptRewrites(draft.Rewrites, sel)
 	}
 
-	payload, _ := json.Marshal(map[string]any{
+	eventErr := db.WriteEvent(ctx, h.Pool, profile, jobID, "resume_drafted", map[string]any{
 		"prompt_version":      draft.PromptVersion,
 		"scorer_version":      deepseek.ScorerVersion,
 		"relevance_threshold": resumesuggest.DefaultThreshold,
@@ -855,10 +853,6 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		"education_removals":  draft.EducationRemovals,
 		"scores":              scores,
 	})
-	_, eventErr := h.Pool.Exec(ctx, `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'resume_drafted', $3::jsonb)
-    `, profile, jobID, string(payload))
 
 	return draft, res, eventErr, nil
 }

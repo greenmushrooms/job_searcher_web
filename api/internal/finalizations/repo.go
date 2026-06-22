@@ -26,7 +26,7 @@ type Finalization struct {
 	// source}]) — the rendered resume's actual text, including manual edits and
 	// accepted AI rewrites. The PDF renderer reads this rather than re-deriving
 	// from canonical.
-	Bullets     json.RawMessage `json:"bullets"`
+	Bullets json.RawMessage `json:"bullets"`
 	// Markdown is the finalized resume as a free-form markdown document — the
 	// source of truth the PDF is rendered from in the markdown-centric flow.
 	Markdown    string `json:"markdown"`
@@ -168,19 +168,12 @@ func (r *Repo) Save(ctx context.Context, in SaveInput) (*Finalization, error) {
 // and Restore (a restore produces a new current version, same as a save). q is
 // the enclosing transaction so the event commits atomically with the version.
 func writeGeneratedEvent(ctx context.Context, q db.Querier, sysProfile, jobID, resumeVersion, templateID string, keptIDs []string) error {
-	payload, _ := json.Marshal(map[string]any{
+	return db.WriteEvent(ctx, q, sysProfile, jobID, "resume_generated", map[string]any{
 		"resume_version":  resumeVersion,
 		"template_id":     templateID,
 		"kept_bullet_ids": keptIDs,
 		"kept_count":      len(keptIDs),
 	})
-	if _, err := q.Exec(ctx, `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, 'resume_generated', $3::jsonb)
-    `, sysProfile, jobID, string(payload)); err != nil {
-		return fmt.Errorf("write event: %w", err)
-	}
-	return nil
 }
 
 // Get returns the current tailored resume for (jobID, sysProfile) or nil if none.
