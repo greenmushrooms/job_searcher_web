@@ -83,6 +83,7 @@ func main() {
 		Pool:          pool,
 		Renderer:      renderer,
 	}
+	mh := &handlers.MonitorHandler{Pool: pool, Renderer: renderer}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -122,12 +123,12 @@ func main() {
 			r.Post("/jobs/{id}/replace-template", rh.ReplaceTemplate)
 			r.Get("/jobs/{id}/resume.pdf", rh.ResumePDF)
 			r.Post("/jobs/{id}/resume.pdf", rh.GeneratePDF)
-			r.Get("/jobs/{id}/resume/versions", rh.ResumeVersions)                 // SCD2 version history
+			r.Get("/jobs/{id}/resume/versions", rh.ResumeVersions) // SCD2 version history
 			r.Post("/jobs/{id}/resume/versions/{version}/restore", rh.RestoreResumeVersion)
 			r.Get("/jobs/{id}/cover-letter", rh.CoverLetterFragment)
 			r.Post("/jobs/{id}/cover-letter", rh.SaveCoverLetter)
 			r.Post("/jobs/{id}/cover-letter.pdf", rh.CoverLetterPDF)
-			r.Post("/resume/master", rh.SaveMaster) // diff lab: permanent master save
+			r.Post("/resume/master", rh.SaveMaster)    // diff lab: permanent master save
 			r.Post("/difflab/diff", rh.DiffLabCompute) // diff lab v4: zero-JS recompute
 
 			// Resume template manager (rename / delete / set default).
@@ -170,6 +171,9 @@ func main() {
 	r.Get("/v2", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v2") })
 	r.Get("/v3", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v3") })
 	r.Get("/v4", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v4") })
+
+	// Per-profile search-metrics dashboard (zero-JS inline-SVG charts).
+	r.Get("/monitor", mh.Monitor)
 
 	// Serve web/ as static, but never the templates/ subdir — those are Go
 	// template sources rendered server-side, not public assets.
