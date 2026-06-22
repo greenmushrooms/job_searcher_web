@@ -397,10 +397,11 @@ func (h *ResumeHandler) ReplaceTemplate(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *ResumeHandler) templateSavedEvent(ctx context.Context, profile, jobID, id, name string) {
+	payload, _ := json.Marshal(map[string]string{"template_id": id, "name": name})
 	_, _ = h.Pool.Exec(ctx, `
         INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
         VALUES ($1, $2, 'resume_template_saved', $3::jsonb)
-    `, profile, jobID, fmt.Sprintf(`{"template_id":%q,"name":%q}`, id, name))
+    `, profile, jobID, payload)
 }
 
 func (h *ResumeHandler) renderTemplateSaved(w http.ResponseWriter, r *http.Request, jobID, profile, id, name string) {

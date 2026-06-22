@@ -163,13 +163,3 @@ func newResume(schemaVersion int, bullets []Bullet) *Resume {
 		Version:       fmt.Sprintf("v%d-%s", schemaVersion, hash[:8]),
 	}
 }
-
-// Lookup finds a bullet by composite ID. Returns nil if not found.
-func (r *Resume) Lookup(compositeID string) *Bullet {
-	for i := range r.Bullets {
-		if r.Bullets[i].CompositeID() == compositeID {
-			return &r.Bullets[i]
-		}
-	}
-	return nil
-}

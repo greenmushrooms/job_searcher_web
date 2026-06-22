@@ -63,7 +63,6 @@ func (c *Client) ScoreBullets(ctx context.Context, jobText string, bullets []res
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(8)
 	for i, b := range bullets {
-		i, b := i, b
 		g.Go(func() error {
 			s, err := c.scoreOne(ctx, jobText, b.Text)
 			if err != nil {

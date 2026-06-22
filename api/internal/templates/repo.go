@@ -24,16 +24,7 @@ type Template struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// Bullet is one entry in a template: a reference to a canonical bullet plus an
-// optional text override. OverrideText nil = use the live canonical text.
-type Bullet struct {
-	RoleID       string
-	BulletID     string
-	OverrideText *string
-	SortOrder    int
-}
-
-// Repo holds the pool directly (not db.Querier) because Save/SetDefault need a
+// Repo holds the pool directly (not db.Querier) because writes need a
 // transaction.
 type Repo struct {
 	pool *pgxpool.Pool
@@ -63,42 +54,6 @@ func (r *Repo) List(ctx context.Context, profile string) ([]Template, error) {
 		out = append(out, t)
 	}
 	return out, rows.Err()
-}
-
-// Save creates a new template from a bullet selection and returns its id.
-func (r *Repo) Save(ctx context.Context, profile, name string, bullets []Bullet) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", errors.New("template name required")
-	}
-	id, err := newID()
-	if err != nil {
-		return "", err
-	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO web.resume_templates (sys_profile, template_id, name)
-		VALUES ($1, $2, $3)`, profile, id, name); err != nil {
-		return "", fmt.Errorf("insert template: %w", err)
-	}
-	for _, b := range bullets {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO web.resume_template_bullets
-				(sys_profile, template_id, role_id, bullet_id, override_text, sort_order)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
-			profile, id, b.RoleID, b.BulletID, b.OverrideText, b.SortOrder); err != nil {
-			return "", fmt.Errorf("insert template bullet: %w", err)
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", err
-	}
-	return id, nil
 }
 
 // SaveMarkdown creates a new markdown template (name + body) and returns its
