@@ -2,7 +2,6 @@ package applications
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -120,12 +119,8 @@ func (r *Repo) Upsert(ctx context.Context, jobID, sysProfile, value string, note
 		return nil, fmt.Errorf("upsert application: %w", err)
 	}
 
-	payload, _ := json.Marshal(map[string]any{"value": value, "notes": notes})
-	if _, err := r.q.Exec(ctx, `
-        INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)
-        VALUES ($1, $2, $3, $4::jsonb)
-    `, sysProfile, jobID, value, string(payload)); err != nil {
-		return nil, fmt.Errorf("write event: %w", err)
+	if err := db.WriteEvent(ctx, r.q, sysProfile, jobID, value, map[string]any{"value": value, "notes": notes}); err != nil {
+		return nil, err
 	}
 
 	return &app, nil
