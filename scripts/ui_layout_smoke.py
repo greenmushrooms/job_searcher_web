@@ -94,7 +94,7 @@ def main() -> int:
             n = min(args.jobs, pg.locator(".job-row").count())
             for i in range(n):
                 pg.locator(".job-row").nth(i).click()
-                pg.wait_for_selector(".md-panes, .draft-empty", timeout=20000)
+                pg.wait_for_selector(".draft-fragment", timeout=20000)
                 pg.wait_for_timeout(300)
                 jid = pg.locator(".workspace").get_attribute("id") or f"row{i}"
                 jtag = f"{tag} {jid}"
@@ -103,8 +103,11 @@ def main() -> int:
                 ok &= check(not page_has_h_scroll(pg), f"{jtag}: horizontal scroll")
                 ok &= check(not banner_visible(pg), f"{jtag}: error banner")
 
-                left = pg.locator("textarea[name=markdown]").bounding_box()
-                right = pg.locator(".md-pane.md-right").bounding_box()
+                # working-copy (left) vs AI-suggestions (right) CodeMirror columns.
+                # The textareas are hidden once CodeMirror mounts, so measure the
+                # always-present .cm-col panes instead.
+                left = pg.locator(".cm-col").nth(0).bounding_box()
+                right = pg.locator(".cm-col").nth(1).bounding_box()
                 # on narrow viewports the panes stack vertically; overlap is
                 # only a bug when they sit side by side
                 if left and right and abs(left["y"] - right["y"]) < 50:
@@ -115,7 +118,7 @@ def main() -> int:
                 if left:
                     ok &= check(
                         left["x"] + left["width"] <= width + 1,
-                        f"{jtag}: textarea wider than viewport",
+                        f"{jtag}: working-copy pane wider than viewport",
                     )
 
                 for sel, name in [
