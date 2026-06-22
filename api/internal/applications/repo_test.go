@@ -46,7 +46,7 @@ func openTestConn(t *testing.T) *pgx.Conn {
 }
 
 // TestUpsert_HappyPath posts a status change inside a tx, asserts the row is
-// in web.applications and an event is in web.application_events, then rolls
+// in web.job_review and an event is in web.application_events, then rolls
 // back so the DB is unchanged.
 func TestUpsert_HappyPath(t *testing.T) {
 	ctx := context.Background()
@@ -79,10 +79,10 @@ func TestUpsert_HappyPath(t *testing.T) {
 		t.Errorf("notes: got %v want %q", app.Notes, notes)
 	}
 
-	// Row landed in web.applications.
+	// Row landed in web.job_review.
 	var dbStatus string
 	if err := tx.QueryRow(ctx,
-		`SELECT status FROM web.applications WHERE job_id = $1 AND sys_profile = $2`,
+		`SELECT status FROM web.job_review WHERE job_id = $1 AND sys_profile = $2`,
 		jobID, "TestProfile",
 	).Scan(&dbStatus); err != nil {
 		t.Fatalf("read back: %v", err)
@@ -91,11 +91,11 @@ func TestUpsert_HappyPath(t *testing.T) {
 		t.Errorf("db status: got %q want %q", dbStatus, "applied")
 	}
 
-	// Event was appended.
+	// A typed event was appended (event_type == the transition value).
 	var eventCount int
 	if err := tx.QueryRow(ctx, `
         SELECT count(*) FROM web.application_events
-        WHERE job_id = $1 AND sys_profile = $2 AND event_type = 'status_changed'
+        WHERE job_id = $1 AND sys_profile = $2 AND event_type = 'applied'
     `, jobID, "TestProfile").Scan(&eventCount); err != nil {
 		t.Fatalf("count events: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestUpsert_HappyPath(t *testing.T) {
 	}
 	var rowCount int
 	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM web.applications WHERE job_id = $1 AND sys_profile = $2`,
+		`SELECT count(*) FROM web.job_review WHERE job_id = $1 AND sys_profile = $2`,
 		jobID, "TestProfile",
 	).Scan(&rowCount); err != nil {
 		t.Fatalf("count rows: %v", err)
@@ -120,12 +120,28 @@ func TestUpsert_HappyPath(t *testing.T) {
 	}
 	if err := tx.QueryRow(ctx, `
         SELECT count(*) FROM web.application_events
-        WHERE job_id = $1 AND sys_profile = $2 AND event_type = 'status_changed'
+        WHERE job_id = $1 AND sys_profile = $2
     `, jobID, "TestProfile").Scan(&eventCount); err != nil {
 		t.Fatalf("count events 2: %v", err)
 	}
 	if eventCount != 2 {
 		t.Errorf("event count after second upsert: got %d want 2", eventCount)
+	}
+
+	// A terminal outcome sets final_status without disturbing the stage axis:
+	// status stays at the furthest stage reached (interview), final_status flips.
+	outcome, err := repo.Upsert(ctx, jobID, "TestProfile", "rejected", nil)
+	if err != nil {
+		t.Fatalf("outcome upsert: %v", err)
+	}
+	if outcome.Status != "interview" {
+		t.Errorf("stage after rejection: got %q want %q", outcome.Status, "interview")
+	}
+	if outcome.FinalStatus == nil || *outcome.FinalStatus != "rejected" {
+		t.Errorf("final_status: got %v want %q", outcome.FinalStatus, "rejected")
+	}
+	if outcome.FinalAt == nil {
+		t.Error("final_at: got nil, want a timestamp")
 	}
 }
 

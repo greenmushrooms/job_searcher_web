@@ -1,0 +1,23 @@
+{{- /* One job-list row. Stable id so apply/skip can OOB-swap it. The badge
+       encodes review state; "unread" (no decision yet) gets a dot + bold row.
+       Clicking the row loads the summary into #job-detail. When .OOB is set the
+       row carries hx-swap-oob so it replaces the matching row out-of-band. */ -}}
+<div class="job-row{{ if eq .Status "" }} unread{{ end }}"
+     id="jobrow-{{ .ID }}"
+     {{- if .OOB }} hx-swap-oob="true"{{ end }}
+     hx-get="/ui/jobs/{{ .ID }}/workspace?profile={{ .Profile }}"
+     hx-target="#job-detail" hx-swap="innerHTML">
+  <div class="jr-top">
+    <span class="jr-badge jr-{{ if .Final }}{{ .Final }}{{ else if .Status }}{{ .Status }}{{ else }}unread{{ end }}">
+      {{- if .Final -}}
+        {{- if eq .Final "rejected" }}⊘{{ else if eq .Final "offer" }}🎉{{ end -}}
+      {{- else if eq .Status "applied" }}✓{{ else if eq .Status "screen" }}☎{{ else if eq .Status "interview" }}★{{ else if eq .Status "skipped" }}✗{{ else }}•{{ end -}}
+    </span>
+    <span class="jr-title">{{ .Title }}</span>
+    {{- if .HasResume }}<span class="jr-doc" title="résumé saved">📄</span>{{ end }}
+    <span class="jr-score">{{ .Score }}</span>
+  </div>
+  <div class="jr-meta">
+    {{- .Company }}{{ if .Location }} · {{ .Location }}{{ end }}{{ if .IsRemote }} · remote{{ end }} · {{ .EvalDate }}
+  </div>
+</div>

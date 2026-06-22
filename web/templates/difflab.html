@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>diff lab {{ .Variant }} — résumé</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+  body { font: 14px/1.45 system-ui, sans-serif; max-width: 1500px; margin: 1rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 19px; margin: 0 0 .2rem; }
+  h1 .variant { color: #1a4ed8; text-transform: uppercase; }
+  .sub { color: #666; font-size: 12px; margin-bottom: .8rem; }
+  .sub a { color: #1a4ed8; }
+  button.btn { padding: .35rem .7rem; background: #1a4ed8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  button.btn:hover { background: #1340b5; }
+  button.btn.alt { background: #0a7d2e; } button.btn.alt:hover { background: #086324; }
+  .actions { display: flex; gap: .5rem; align-items: center; margin-bottom: .7rem; }
+  .ver-pick { display: flex; gap: .3rem; align-items: center; font-size: 12px; color: #555; }
+  .ver-pick select { font-size: 12px; padding: .3rem; border: 1px solid #bbb; border-radius: 4px; }
+  #toast { font-size: 12.5px; font-weight: 600; color: #0a7d2e; }
+  #toast.err { color: #b00020; }
+
+  .lab { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; align-items: start; }
+  .col { min-width: 0; }
+  .col-head { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #888; margin: 0 0 .3rem; }
+  .col-head b { color: #555; }
+
+  /* shared text metrics — the overlay backdrop MUST match these exactly */
+  .md, .hl-backdrop {
+    box-sizing: border-box; width: 100%; height: 62vh;
+    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: .6rem; border: 1px solid #ccc; border-radius: 5px;
+    white-space: pre; tab-size: 4;
+  }
+  textarea.md { resize: vertical; overflow: auto; }
+
+  /* ── v1: highlight overlay behind each editable textarea ── */
+  .pane-wrap { position: relative; }
+  .pane-wrap .hl-backdrop {
+    position: absolute; inset: 0; margin: 0; overflow: hidden;
+    color: transparent; background: #fff; pointer-events: none; z-index: 0;
+  }
+  .pane-wrap textarea.hl-textarea {
+    position: relative; z-index: 1; background: transparent; height: 62vh;
+  }
+  .hl-line { display: block; min-height: 1.5em; }
+  .hl-del { background: #ffe0e3; }
+  .hl-add { background: #e2f7e8; }
+
+  /* ── v2: two CodeMirror editors + line-level diff ── */
+  #cm { display: flex; position: relative; border: 1px solid #ccc; border-radius: 5px; overflow: hidden; }
+  #cmgutter { position: absolute; left: 50%; top: 0; bottom: 0; width: 0; pointer-events: none; z-index: 5; }
+  .hunk-ctl { position: absolute; left: -20px; display: flex; gap: 2px; pointer-events: auto; }
+  .hunk-ctl button { width: 19px; height: 19px; padding: 0; line-height: 17px; font-size: 13px; border: 1px solid #bbb; border-radius: 3px; background: #fff; color: #333; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+  .hunk-ctl button:hover { background: #1a4ed8; color: #fff; border-color: #1a4ed8; }
+  .cm-col { flex: 1; min-width: 0; }
+  .cm-col:first-child { border-right: 1px solid #e3e3e3; }
+  .cm-col-head { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #888; padding: .35rem .5rem; background: #fafafa; border-bottom: 1px solid #eee; }
+  .cm-col-head b { color: #555; }
+  #cm .cm-editor { height: 60vh; }
+  #cm .cm-del-line { background: #ffe9eb; }
+  #cm .cm-add-line { background: #e9f8ee; }
+  #cm .cm-chg-line { background: #fff8e0; }
+  #cm .cm-del-text { background: #ffc9cf; text-decoration: line-through; }
+  #cm .cm-add-text { background: #a9efc1; }
+  #cm .cm-spacer { background: repeating-linear-gradient(45deg, #f4f4f5, #f4f4f5 6px, #fbfbfc 6px, #fbfbfc 12px); }
+  .cm-note { font-size: 12px; color: #888; margin-top: .4rem; }
+
+  /* ── v4: zero-JS server-rendered diff ── */
+  .dl4-edit { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; align-items: start; margin-bottom: .5rem; }
+  .dl4-edit .md { height: 30vh; }
+  .dl4-note { font-size: 12px; color: #888; margin: .1rem 0 .5rem; }
+  .dl4-diff { border: 1px solid #ccc; border-radius: 5px; overflow: auto; max-height: 52vh; }
+  .dl4-diff.htmx-request { opacity: .55; transition: opacity .12s; }
+  table.dl4-table { width: 100%; border-collapse: collapse; table-layout: fixed;
+                    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  table.dl4-table td.dlc { width: 50%; vertical-align: top; padding: 0 .5rem; min-height: 1.5em;
+                           white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+  table.dl4-table td.dlc:first-child { border-right: 1px solid #ddd; }
+  .dl-del { background: #ffe9eb; }
+  .dl-add { background: #e9f8ee; }
+  .dl-chg { background: #fff8e0; }
+  .dl-blank { background: repeating-linear-gradient(45deg, #f4f4f5, #f4f4f5 6px, #fbfbfc 6px, #fbfbfc 12px); }
+  table.dl4-table td:first-child .d { background: #ffc9cf; text-decoration: line-through; }
+  table.dl4-table td:last-child .d  { background: #a9efc1; }
+
+  /* ── v3: on-demand compare panel ── */
+  .compare-out { margin-top: .9rem; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  .cmp-col { border: 1px solid #eee; border-radius: 5px; padding: .5rem .6rem; background: #fcfcfd;
+             font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+             white-space: pre; overflow: auto; max-height: 62vh; }
+  .cl { display: block; min-height: 1.5em; }
+  .cl-del { background: #ffe0e3; }
+  .cl-add { background: #e2f7e8; }
+</style>
+</head>
+<body data-variant="{{ .Variant }}" data-job="{{ .JobID }}" data-profile="{{ .Profile }}">
+  <h1>Résumé diff lab — <span class="variant">{{ .Variant }}</span></h1>
+  <div class="sub">
+    Left = your <b>master résumé</b> (edit &amp; <b>save permanently</b>). Right = the version tailored for
+    <b>{{ if .JobTitle }}{{ .JobTitle }}{{ else }}this job{{ end }}</b>.
+    Compare highlighting styles: <a href="/v1">/v1</a> · <a href="/v2">/v2</a> · <a href="/v3">/v3</a> · <a href="/v4">/v4</a> <b>(zero-JS)</b>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn save" data-target="left">💾 Save master</button>
+    <button type="button" class="btn alt save" data-target="right">💾 Save for job</button>
+    <button type="button" class="btn" id="pdfBtn" style="background:#6b21a8">📄 PDF (this job)</button>
+    <label class="ver-pick" style="display:none">Job version
+      <select id="versionSel"></select>
+    </label>
+    <button type="button" class="btn" id="restoreBtn" style="display:none;background:#0f766e">↩ Restore</button>
+    {{- if eq .Variant "v3" }}
+    <button type="button" class="btn" id="compareBtn" style="background:#444">🔍 Compare</button>
+    {{- end }}
+    <span id="toast"></span>
+  </div>
+
+  {{- if eq .Variant "v2" }}
+  <div id="cm">
+    <div class="cm-col"><div class="cm-col-head"><b>Master résumé</b> — saved permanently</div><div id="cmA"></div></div>
+    <div class="cm-col"><div class="cm-col-head"><b>This job</b> — saved for this job only</div><div id="cmB"></div></div>
+    <div id="cmgutter"></div>
+  </div>
+  <div class="cm-note">CodeMirror editors with a line-level diff — both sides editable, highlights update live. Loads the editor from a CDN (needs internet).</div>
+  <textarea id="left" hidden>{{ .MasterMarkdown }}</textarea>
+  <textarea id="right" hidden>{{ .JobMarkdown }}</textarea>
+  {{- else if eq .Variant "v4" }}
+  {{- /* Zero-JS diff: edit either textarea, htmx posts both panes to
+         /ui/difflab/diff (debounced) and swaps the server-rendered, line-aligned
+         diff below. No editor JS, no CodeMirror CDN — the diff is computed in Go
+         (package resumediff). The shared difflab.js still reads #left/#right for
+         save / PDF / version-restore. */ -}}
+  <form id="v4form" class="dl4-edit">
+    <div class="col">
+      <div class="col-head"><b>Master résumé</b> — saved permanently</div>
+      <textarea id="left" name="left" class="md" spellcheck="false"
+                hx-post="/ui/difflab/diff" hx-include="#v4form" hx-target="#v4-diff"
+                hx-swap="innerHTML" hx-trigger="input changed delay:500ms">{{ .MasterMarkdown }}</textarea>
+    </div>
+    <div class="col">
+      <div class="col-head"><b>This job</b> — saved for this job only</div>
+      <textarea id="right" name="right" class="md" spellcheck="false"
+                hx-post="/ui/difflab/diff" hx-include="#v4form" hx-target="#v4-diff"
+                hx-swap="innerHTML" hx-trigger="input changed delay:500ms">{{ .JobMarkdown }}</textarea>
+    </div>
+  </form>
+  <div class="dl4-note">Edit either side; the aligned diff refreshes ~½s after you stop typing — rendered entirely server-side (no editor JS, no CodeMirror CDN).</div>
+  <div id="v4-diff" class="dl4-diff">{{ template "difflab_diff" .DiffRows }}</div>
+  {{- else }}
+  <div class="lab">
+    <div class="col">
+      <div class="col-head"><b>Master résumé</b> — saved permanently</div>
+      <div class="pane-wrap">
+        <textarea id="left" class="md" spellcheck="false">{{ .MasterMarkdown }}</textarea>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-head"><b>This job</b> — saved for this job only</div>
+      <div class="pane-wrap">
+        <textarea id="right" class="md" spellcheck="false">{{ .JobMarkdown }}</textarea>
+      </div>
+    </div>
+  </div>
+  {{- end }}
+
+  {{- if eq .Variant "v3" }}
+  <div class="compare-out" id="compareOut"></div>
+  {{- end }}
+
+  <script src="/difflab.js"></script>
+  {{- if eq .Variant "v2" }}
+  <script type="module">
+    // Two CodeMirror editors with a LINE-LEVEL diff (LCS) we compute ourselves,
+    // rendered as line-background decorations plus height-matched spacers that
+    // keep the two sides aligned. We don't use @codemirror/merge because its
+    // character-level diff smears whole-line deletions across adjacent bullets.
+    import { EditorView, basicSetup } from "https://esm.sh/codemirror@6.0.1";
+    import { Decoration, WidgetType } from "https://esm.sh/@codemirror/view@6";
+    import { StateField, StateEffect } from "https://esm.sh/@codemirror/state@6";
+
+    // Word-level diff of one modified line pair → inline highlight ranges, the
+    // way diffchecker does it: a changed word is highlighted whole, not the few
+    // differing letters within it. Each line is tokenized into alternating
+    // whitespace / non-whitespace runs; the tokens are LCS-matched and the
+    // unmatched ones become character ranges to highlight.
+    function tokenize(s) {
+      const toks = []; let i = 0;
+      while (i < s.length) {
+        const ws = /\s/.test(s[i]); let j = i + 1;
+        while (j < s.length && /\s/.test(s[j]) === ws) j++;
+        toks.push({ text: s.slice(i, j), start: i, end: j });
+        i = j;
+      }
+      return toks;
+    }
+    function coalesce(ranges) {
+      if (ranges.length < 2) return ranges;
+      ranges.sort((a, b) => a[0] - b[0]);
+      const out = [ranges[0].slice()];
+      for (let k = 1; k < ranges.length; k++) {
+        const last = out[out.length - 1];
+        if (ranges[k][0] <= last[1]) last[1] = Math.max(last[1], ranges[k][1]);
+        else out.push(ranges[k].slice());
+      }
+      return out;
+    }
+    function wordDiff(a, b) {
+      if (a.length > 2000 || b.length > 2000) return { aRanges: a.length ? [[0, a.length]] : [], bRanges: b.length ? [[0, b.length]] : [] };
+      const ta = tokenize(a), tb = tokenize(b), n = ta.length, m = tb.length;
+      const dp = []; for (let i = 0; i <= n; i++) dp.push(new Int32Array(m + 1));
+      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+        dp[i][j] = ta[i].text === tb[j].text ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      const aR = [], bR = []; let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (ta[i].text === tb[j].text) { i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) { aR.push([ta[i].start, ta[i].end]); i++; }
+        else { bR.push([tb[j].start, tb[j].end]); j++; }
+      }
+      while (i < n) { aR.push([ta[i].start, ta[i].end]); i++; }
+      while (j < m) { bR.push([tb[j].start, tb[j].end]); j++; }
+      return { aRanges: coalesce(aR), bRanges: coalesce(bR) };
+    }
+
+    // Similarity of two lines = Dice coefficient over their word tokens (LCS of
+    // the non-whitespace tokens). Decides whether two lines in a changed region
+    // are "the same point, edited" (pair + word-diff) vs unrelated points.
+    function lineSim(a, b) {
+      if (a === b) return 1;
+      const ta = tokenize(a).filter(t => /\S/.test(t.text)).map(t => t.text);
+      const tb = tokenize(b).filter(t => /\S/.test(t.text)).map(t => t.text);
+      if (!ta.length && !tb.length) return 1;
+      if (!ta.length || !tb.length) return 0;
+      const n = ta.length, m = tb.length, dp = []; for (let i = 0; i <= n; i++) dp.push(new Int32Array(m + 1));
+      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+        dp[i][j] = ta[i] === tb[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      return 2 * dp[0][0] / (n + m);
+    }
+
+    // Within a changed gap (left lines Lidx, right lines Ridx — none exactly
+    // equal) find the best order-preserving alignment: each line is deleted,
+    // added, or substituted against a SIMILAR line on the other side. The
+    // similarity threshold means an unrelated deleted point is never paired with
+    // (and word-diffed into) a changed point that happens to sit next to it.
+    function alignGap(Lidx, Ridx, A, B) {
+      const p = Lidx.length, q = Ridx.length, THRESH = 0.5;
+      const cost = [], back = [];
+      for (let i = 0; i <= p; i++) { cost.push(new Float64Array(q + 1)); back.push(new Array(q + 1).fill(0)); }
+      for (let i = p; i >= 0; i--) for (let j = q; j >= 0; j--) {
+        if (i === p && j === q) { cost[i][j] = 0; continue; }
+        let best = Infinity, bk = 0;
+        if (i < p) { const c = 1 + cost[i + 1][j]; if (c < best) { best = c; bk = 1; } }
+        if (j < q) { const c = 1 + cost[i][j + 1]; if (c < best) { best = c; bk = 2; } }
+        if (i < p && j < q) { const s = lineSim(A[Lidx[i]], B[Ridx[j]]); if (s >= THRESH) { const c = (1 - s) + cost[i + 1][j + 1]; if (c < best) { best = c; bk = 3; } } }
+        cost[i][j] = best; back[i][j] = bk;
+      }
+      const ops = []; let i = 0, j = 0;
+      while (i < p || j < q) {
+        const bk = back[i][j];
+        if (bk === 3) { ops.push({ t: 'sub', a: Lidx[i], b: Ridx[j] }); i++; j++; }
+        else if (bk === 1 || (bk === 0 && i < p)) { ops.push({ t: 'del', a: Lidx[i] }); i++; }
+        else { ops.push({ t: 'add', b: Ridx[j] }); j++; }
+      }
+      return ops;
+    }
+
+    // Line diff over EXACT-equal lines gives anchors; each gap between anchors
+    // is aligned by similarity (alignGap) and turned into rows. Leftover del+add
+    // in a gap merge into "replace" rows (whole red line ↔ whole green line, same
+    // row) so dissimilar points sit side by side instead of being word-diffed
+    // into each other. Rows then yield per-line classes (same / del / add / chg
+    // with inline word marks) and the spacers that keep the columns aligned;
+    // rows with both sides (sub/replace) are recorded for height-balancing.
+    function computeDiff(aText, bText) {
+      const A = aText.split('\n'), B = bText.split('\n'), n = A.length, m = B.length;
+      const dp = []; for (let i = 0; i <= n; i++) dp.push(new Int32Array(m + 1));
+      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+        dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      const matches = []; let i = 0, j = 0;
+      while (i < n && j < m) { if (A[i] === B[j]) { matches.push([i, j]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++; }
+
+      const rows = [];
+      function emitGap(loI, hiI, loJ, hiJ) {
+        const Lidx = []; for (let x = loI; x < hiI; x++) Lidx.push(x);
+        const Ridx = []; for (let y = loJ; y < hiJ; y++) Ridx.push(y);
+        if (!Lidx.length && !Ridx.length) return;
+        const ops = alignGap(Lidx, Ridx, A, B);
+        let bd = [], ba = [];
+        function flush() {
+          const k = Math.min(bd.length, ba.length);
+          for (let t = 0; t < k; t++) rows.push({ l: bd[t], r: ba[t], kind: 'replace' });
+          for (let t = k; t < bd.length; t++) rows.push({ l: bd[t], r: -1, kind: 'del' });
+          for (let t = k; t < ba.length; t++) rows.push({ l: -1, r: ba[t], kind: 'add' });
+          bd = []; ba = [];
+        }
+        for (const op of ops) {
+          if (op.t === 'sub') { flush(); rows.push({ l: op.a, r: op.b, kind: 'sub' }); }
+          else if (op.t === 'del') bd.push(op.a);
+          else ba.push(op.b);
+        }
+        flush();
+      }
+      let pi = -1, pj = -1;
+      for (const [mi, mj] of matches) { emitGap(pi + 1, mi, pj + 1, mj); rows.push({ l: mi, r: mj, kind: 'same' }); pi = mi; pj = mj; }
+      emitGap(pi + 1, n, pj + 1, m);
+
+      const aLine = Array.from({ length: n }, () => ({ cls: 'same', marks: [] }));
+      const bLine = Array.from({ length: m }, () => ({ cls: 'same', marks: [] }));
+      const leftSpacers = [], rightSpacers = [], balanceRows = [];
+      let pendDel = [], pendAdd = [];
+      for (const row of rows) {
+        if (row.l >= 0 && row.r >= 0) {
+          if (pendDel.length) { rightSpacers.push({ pos: row.r, src: pendDel }); pendDel = []; }
+          if (pendAdd.length) { leftSpacers.push({ pos: row.l, src: pendAdd }); pendAdd = []; }
+          if (row.kind === 'sub') {
+            const cd = wordDiff(A[row.l], B[row.r]);
+            aLine[row.l] = { cls: 'chg', marks: cd.aRanges };
+            bLine[row.r] = { cls: 'chg', marks: cd.bRanges };
+            balanceRows.push({ a: row.l, b: row.r });
+          } else if (row.kind === 'replace') {
+            aLine[row.l] = { cls: 'del', marks: [] };
+            bLine[row.r] = { cls: 'add', marks: [] };
+            balanceRows.push({ a: row.l, b: row.r });
+          }
+        } else if (row.l >= 0) { aLine[row.l] = { cls: 'del', marks: [] }; pendDel.push(row.l); }
+        else if (row.r >= 0) { bLine[row.r] = { cls: 'add', marks: [] }; pendAdd.push(row.r); }
+      }
+      if (pendDel.length) rightSpacers.push({ pos: m, src: pendDel });
+      if (pendAdd.length) leftSpacers.push({ pos: n, src: pendAdd });
+      return { aLine, bLine, leftSpacers, rightSpacers, balanceRows, rows, n, m };
+    }
+
+    // Group consecutive changed rows into hunks. Each hunk records the left/right
+    // line indices it spans and the anchor line on each side (the line right
+    // after it) so a pure insertion/deletion knows where to land.
+    function buildHunks(rows, n, m) {
+      const hunks = []; let cur = null;
+      for (const row of rows) {
+        if (row.kind === 'same') {
+          if (cur) { cur.leftAnchor = row.l; cur.rightAnchor = row.r; hunks.push(cur); cur = null; }
+        } else {
+          if (!cur) cur = { L: [], R: [], leftAnchor: n, rightAnchor: m, topL: -1, topR: -1 };
+          if (row.l >= 0) { cur.L.push(row.l); if (cur.topL < 0) cur.topL = row.l; }
+          if (row.r >= 0) { cur.R.push(row.r); if (cur.topR < 0) cur.topR = row.r; }
+        }
+      }
+      if (cur) hunks.push(cur);
+      return hunks;
+    }
+
+    // Apply one hunk to the other side: '>' makes the right pane match the left
+    // for that section (left→right), '<' makes the left match the right.
+    function blockText(doc, idxs) {
+      return doc.sliceString(doc.line(idxs[0] + 1).from, doc.line(idxs[idxs.length - 1] + 1).to);
+    }
+    function writeLines(view, idxs, text, anchorIdx) {
+      const doc = view.state.doc;
+      if (idxs.length) {
+        if (text === null) { // delete these whole lines (with one surrounding newline)
+          const last = idxs[idxs.length - 1];
+          const from = (last + 1 < doc.lines) ? doc.line(idxs[0] + 1).from : (idxs[0] > 0 ? doc.line(idxs[0]).to : doc.line(idxs[0] + 1).from);
+          const to = (last + 1 < doc.lines) ? doc.line(last + 2).from : doc.line(last + 1).to;
+          view.dispatch({ changes: { from, to, insert: '' } });
+        } else { // replace the line contents
+          view.dispatch({ changes: { from: doc.line(idxs[0] + 1).from, to: doc.line(idxs[idxs.length - 1] + 1).to, insert: text } });
+        }
+      } else if (text !== null) { // insert new lines at the anchor
+        const atEnd = anchorIdx >= doc.lines;
+        const pos = atEnd ? doc.length : doc.line(anchorIdx + 1).from;
+        view.dispatch({ changes: { from: pos, to: pos, insert: atEnd ? (doc.length ? '\n' + text : text) : text + '\n' } });
+      }
+    }
+    function applyHunk(h, dir) {
+      if (dir === 'toRight') writeLines(right, h.R, h.L.length ? blockText(left.state.doc, h.L) : null, h.rightAnchor);
+      else writeLines(left, h.L, h.R.length ? blockText(right.state.doc, h.R) : null, h.leftAnchor);
+    }
+
+    class Spacer extends WidgetType {
+      constructor(h) { super(); this.h = h; }
+      eq(o) { return o.h === this.h; }
+      toDOM() { const d = document.createElement('div'); d.style.height = this.h + 'px'; d.className = 'cm-spacer'; return d; }
+      get estimatedHeight() { return this.h; }
+    }
+    const setDeco = StateEffect.define();
+    const diffField = StateField.define({
+      create() { return Decoration.none; },
+      update(v, tr) { v = v.map(tr.changes); for (const e of tr.effects) if (e.is(setDeco)) v = e.value; return v; },
+      provide: f => EditorView.decorations.from(f),
+    });
+
+    function lineHeights(srcView, indices) {
+      let total = 0;
+      for (const idx of indices) {
+        if (idx + 1 > srcView.state.doc.lines) continue;
+        total += srcView.lineBlockAt(srcView.state.doc.line(idx + 1).from).height;
+      }
+      return total || (indices.length * (srcView.defaultLineHeight || 18));
+    }
+    function lineH(view, idx) {
+      if (idx + 1 > view.state.doc.lines) return view.defaultLineHeight || 18;
+      return view.lineBlockAt(view.state.doc.line(idx + 1).from).height;
+    }
+    function buildDeco(view, info, spacers, side) {
+      const doc = view.state.doc, ranges = [];
+      for (let k = 0; k < info.length; k++) {
+        const li = info[k]; if (li.cls === 'same') continue;
+        const line = doc.line(k + 1);
+        ranges.push(Decoration.line({ class: li.cls === 'del' ? 'cm-del-line' : li.cls === 'add' ? 'cm-add-line' : 'cm-chg-line' }).range(line.from));
+        if (li.cls === 'chg') for (const [s, e] of li.marks) if (e > s)
+          ranges.push(Decoration.mark({ class: side === 'left' ? 'cm-del-text' : 'cm-add-text' }).range(line.from + s, line.from + e));
+      }
+      for (const sp of spacers) {
+        let pos, sd;
+        if (sp.side === 'after') { const ln = doc.line(Math.min(sp.pos + 1, doc.lines)); pos = ln.to; sd = 1; }
+        else if (sp.pos >= doc.lines) { pos = doc.length; sd = 1; }
+        else { pos = doc.line(sp.pos + 1).from; sd = -1; }
+        ranges.push(Decoration.widget({ widget: new Spacer(sp.height), block: true, side: sd }).range(pos));
+      }
+      return Decoration.set(ranges, true);
+    }
+    function resolveSpacers(list, srcView) {
+      return list.map(sp => ({ pos: sp.pos, side: 'before', height: lineHeights(srcView, sp.src) }));
+    }
+
+    let left, right, hunks = [];
+    function recompute() {
+      const d = computeDiff(left.state.doc.toString(), right.state.doc.toString());
+      const lsp = resolveSpacers(d.leftSpacers, right), rsp = resolveSpacers(d.rightSpacers, left);
+      // Balance two-sided rows (edited or replaced) that wrap to different heights.
+      for (const pr of d.balanceRows) {
+        const hA = lineH(left, pr.a), hB = lineH(right, pr.b);
+        if (hA < hB - 0.5) lsp.push({ pos: pr.a, side: 'after', height: hB - hA });
+        else if (hB < hA - 0.5) rsp.push({ pos: pr.b, side: 'after', height: hA - hB });
+      }
+      left.dispatch({ effects: setDeco.of(buildDeco(left, d.aLine, lsp, 'left')) });
+      right.dispatch({ effects: setDeco.of(buildDeco(right, d.bLine, rsp, 'right')) });
+      hunks = buildHunks(d.rows, d.n, d.m);
+      requestAnimationFrame(positionGutter);
+    }
+    const listener = EditorView.updateListener.of(u => { if (u.docChanged) queueMicrotask(recompute); });
+
+    // Render the center ‹ / › controls, one per hunk, at the hunk's top Y. ‹ pulls
+    // the right version into the left; › pushes the left version into the right.
+    function positionGutter() {
+      const gutter = document.getElementById('cmgutter');
+      if (!gutter) return;
+      gutter.innerHTML = '';
+      const cmTop = document.getElementById('cm').getBoundingClientRect().top;
+      const scTop = left.scrollDOM.getBoundingClientRect().top - cmTop;
+      const viewH = left.scrollDOM.clientHeight, scroll = left.scrollDOM.scrollTop;
+      for (const h of hunks) {
+        let blockTop;
+        if (h.topL >= 0) blockTop = left.lineBlockAt(left.state.doc.line(h.topL + 1).from).top;
+        else if (h.topR >= 0) blockTop = right.lineBlockAt(right.state.doc.line(h.topR + 1).from).top;
+        else continue;
+        const y = blockTop - scroll;
+        if (y < -10 || y > viewH + 10) continue;
+        const ctl = document.createElement('div');
+        ctl.className = 'hunk-ctl';
+        ctl.style.top = (scTop + y + 1) + 'px';
+        const bl = document.createElement('button'); bl.type = 'button'; bl.textContent = '‹'; bl.title = 'Use the right version here (right → left)';
+        const br = document.createElement('button'); br.type = 'button'; br.textContent = '›'; br.title = 'Use the left version here (left → right)';
+        bl.addEventListener('click', () => applyHunk(h, 'toLeft'));
+        br.addEventListener('click', () => applyHunk(h, 'toRight'));
+        ctl.appendChild(bl); ctl.appendChild(br); gutter.appendChild(ctl);
+      }
+    }
+
+    left = new EditorView({ doc: document.getElementById('left').value, extensions: [basicSetup, diffField, listener, EditorView.lineWrapping], parent: document.getElementById('cmA') });
+    right = new EditorView({ doc: document.getElementById('right').value, extensions: [basicSetup, diffField, listener, EditorView.lineWrapping], parent: document.getElementById('cmB') });
+    // First pass after layout so spacer heights measure real (wrapped) lines.
+    setTimeout(recompute, 120);
+
+    // Aligned heights → 1:1 scroll sync; keep the center controls pinned to
+    // their hunks as the panes scroll.
+    (function (a, b) {
+      let lock = false;
+      function bind(s, d) { s.addEventListener('scroll', () => { requestAnimationFrame(positionGutter); if (lock) return; lock = true; d.scrollTop = s.scrollTop; requestAnimationFrame(() => lock = false); }); }
+      bind(a, b); bind(b, a);
+    })(left.scrollDOM, right.scrollDOM);
+    window.addEventListener('resize', () => requestAnimationFrame(positionGutter));
+
+    // Expose get/set so the shared save buttons and version picker can read and
+    // replace either pane's text (replacing the doc fires the diff recompute).
+    window.__cmGet = (side) => side === 'a' ? left.state.doc.toString() : right.state.doc.toString();
+    window.__cmSet = (side, text) => {
+      const v = side === 'a' ? left : right;
+      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } });
+    };
+  </script>
+  {{- end }}
+</body>
+</html>

@@ -4,6 +4,9 @@
      id="status-{{ .JobID }}-{{ .SysProfile }}"
      data-status="{{ .Status }}">
   <span class="status-badge status-{{ .Status }}">{{ .Status }}</span>
+  {{- if .Final }}
+  <span class="status-badge status-{{ .Final }}">{{ .Final }}</span>
+  {{- end }}
   <span class="status-meta">updated {{ .UpdatedAt }}</span>
   {{- if .Notes }}
   <div class="status-notes">{{ .Notes }}</div>

@@ -1,0 +1,61 @@
+{{- /* Right-hand job summary + review actions. Two axes: stage buttons
+       (Apply/Screen/Interview/Skip → job_review.status) and outcome buttons
+       (Offer/Rejected → final_status). All post to row-status; the response
+       re-renders this summary (main swap) and OOB-swaps the list row's badge. */ -}}
+<div class="job-summary" id="summary-{{ .ID }}">
+  <div class="js-row1">
+    <h2>
+      {{- if .URL }}<a href="{{ .URL }}" target="_blank" rel="noopener">{{ .Title }}</a>
+      {{- else }}{{ .Title }}{{ end }}
+      {{- if .Verdict }} <span class="js-verdict">{{ .Verdict }}</span>{{ end }}
+    </h2>
+    <span class="js-score">{{ .Score }}</span>
+  </div>
+  <div class="js-meta">
+    {{- .Company }} · {{ .Location }}{{ if .IsRemote }} · remote{{ end }}
+    · posted {{ .DatePosted }} · eval {{ .EvalDate }}
+    {{- if .Compensation }} · {{ .Compensation }}{{ end }}
+  </div>
+  {{- if .Summary }}
+  <div class="js-label">summary</div>
+  <div class="js-text">{{ .Summary }}</div>
+  {{- end }}
+  {{- if .TechStack }}
+  <div class="js-label">tech stack</div>
+  <div class="js-text">{{ .TechStack }}</div>
+  {{- end }}
+  <div class="js-actions">
+    <div class="js-status">
+      stage: <b>{{ if .Status }}{{ .Status }}{{ else }}undecided{{ end }}</b>
+      {{- if .Final }} · outcome: <b class="js-final js-final-{{ .Final }}">{{ .Final }}</b>{{ end }}
+    </div>
+    <div class="js-btns">
+      <span class="js-btns-label">stage</span>
+      <button class="small"
+              hx-post="/ui/jobs/{{ .ID }}/row-status"
+              hx-vals='{"status":"applied","profile":"{{ .Profile }}"}'
+              hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Apply ✓</button>
+      <button class="small info"
+              hx-post="/ui/jobs/{{ .ID }}/row-status"
+              hx-vals='{"status":"screen","profile":"{{ .Profile }}"}'
+              hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Screen ☎</button>
+      <button class="small warn"
+              hx-post="/ui/jobs/{{ .ID }}/row-status"
+              hx-vals='{"status":"interview","profile":"{{ .Profile }}"}'
+              hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Interview ★</button>
+      <button class="small secondary"
+              hx-post="/ui/jobs/{{ .ID }}/row-status"
+              hx-vals='{"status":"skipped","profile":"{{ .Profile }}"}'
+              hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Skip ✗</button>
+      <span class="js-btns-label">outcome</span>
+      <button class="small alt"
+              hx-post="/ui/jobs/{{ .ID }}/row-status"
+              hx-vals='{"status":"offer","profile":"{{ .Profile }}"}'
+              hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Offer 🎉</button>
+      <button class="small danger"
+              hx-post="/ui/jobs/{{ .ID }}/row-status"
+              hx-vals='{"status":"rejected","profile":"{{ .Profile }}"}'
+              hx-target="#summary-{{ .ID }}" hx-swap="outerHTML">Rejected ⊘</button>
+    </div>
+  </div>
+</div>

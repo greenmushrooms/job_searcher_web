@@ -1,63 +1,133 @@
-{{- /* Tailored-resume draft fragment. Rendered standalone for hx-swap=outerHTML
-       after GET /ui/jobs/{id}/draft or POST /ui/jobs/{id}/draft. Empty state
-       (NoDraft=true) shows a "draft now" button that POSTs back to this same
-       endpoint to trigger DeepSeek and swap in the populated fragment. */ -}}
-<div class="draft-fragment" id="draft-{{ .JobID }}">
-  {{- if .NoDraft }}
-  <div class="draft-empty">
-    <p>No draft yet for <code>{{ .JobID }}</code> (profile <code>{{ .Profile }}</code>).</p>
-    <button class="draft-trigger"
-            hx-post="/ui/jobs/{{ .JobID }}/draft"
-            hx-vals='{"profile":"{{ .Profile }}"}'
-            hx-target="#draft-{{ .JobID }}"
-            hx-swap="outerHTML"
-            hx-indicator="#draft-spinner-{{ .JobID }}">
-      Draft now (calls DeepSeek, ~60s)
-    </button>
-    <span id="draft-spinner-{{ .JobID }}" class="htmx-indicator">working…</span>
-  </div>
-  {{- else }}
+{{- /* Résumé workspace, swapped into #job-draft. Two CodeMirror editors with a
+       live word-level diff (web/resume_diff.js mounts them on htmx swap): LEFT =
+       the working copy (`markdown`, what "Save résumé" persists and the PDF
+       renders from), RIGHT = an editable copy of the AI-tailored résumé
+       (`tailored`). The center ‹/› controls pull a hunk into the working copy or
+       push the other way; "Apply to working copy" does the whole document. The
+       textareas stay in the DOM (hidden once the editors mount) so htmx form
+       posts and the native PDF submit keep serializing the current text, and so
+       the page still works if the CodeMirror CDN is unreachable. */ -}}
+<div class="draft-fragment">
+  {{- if not .NoDraft }}
   <header class="draft-meta">
-    <span class="meta-item"><b>kept</b> {{ .KeptCount }}/{{ .TotalCount }}</span>
+    <span class="meta-item"><b>removed</b> {{ .RemovedCount }}</span>
+    <span class="meta-item"><b>rewritten</b> {{ .RewriteCount }}</span>
+    {{- if gt .EducationPrunedCount 0 }}<span class="meta-item"><b>edu pruned</b> {{ .EducationPrunedCount }}</span>{{ end }}
+    <span class="meta-item"><b>template</b> {{ .TemplateName }}</span>
     <span class="meta-item"><b>model</b> {{ .Model }}</span>
-    <span class="meta-item"><b>resume</b> {{ .ResumeVersion }}</span>
+    <span class="meta-item"><b>résumé</b> {{ .ResumeVersion }}</span>
     <span class="meta-item"><b>drafted</b> {{ .DraftedAt }}</span>
-    <span class="meta-item"><b>cost</b> ${{ printf "%.4f" .CostUSD }}</span>
-    <button class="draft-refresh"
-            hx-post="/ui/jobs/{{ .JobID }}/draft"
-            hx-vals='{"profile":"{{ .Profile }}"}'
-            hx-target="#draft-{{ .JobID }}"
-            hx-swap="outerHTML"
-            hx-confirm="Re-draft? This will call DeepSeek again (~60s, ~$0.005)."
-            hx-indicator="#draft-spinner-{{ .JobID }}">
-      re-draft
-    </button>
-    <span id="draft-spinner-{{ .JobID }}" class="htmx-indicator">working…</span>
+    {{- if gt .CostUSD 0.0 }}<span class="meta-item"><b>cost</b> ${{ printf "%.4f" .CostUSD }}</span>{{ end }}
   </header>
-  <form class="draft-form"
-        hx-post="/api/v1/jobs/{{ .JobID }}/finalize-resume"
-        hx-ext="json-enc"
-        hx-vals='{"profile":"{{ .Profile }}","resume_version":"{{ .ResumeVersion }}"}'>
-    {{- range .Roles }}
-    <fieldset class="draft-role" data-role-id="{{ .RoleID }}">
-      <legend>
-        {{- if .RoleTitle }}<span class="role-title">{{ .RoleTitle }}</span>{{ end }}
-        {{- if .RoleCompany }} <span class="role-company">— {{ .RoleCompany }}</span>{{ end }}
-        {{- if .RoleDates }} <span class="role-dates">({{ .RoleDates }})</span>{{ end }}
-      </legend>
-      {{- range .Bullets }}
-      <label class="draft-bullet" data-keep="{{ .Keep }}">
-        <input type="checkbox" name="kept_bullet_ids" value="{{ .CompositeID }}"
-               {{- if .Keep }} checked{{ end }}>
-        <span class="bullet-text">{{ .Text }}</span>
-        {{- if .Reason }}
-        <span class="bullet-reason">{{ .Reason }}</span>
-        {{- end }}
-      </label>
-      {{- end }}
-    </fieldset>
-    {{- end }}
-    <button type="submit" class="draft-finalize">Finalize selection</button>
-  </form>
   {{- end }}
+
+  {{- if .Density.HasFindings }}
+  <details class="density-banner" open>
+    <summary>⚠ {{ .Density.Verdict }}</summary>
+    <ul class="density-list">
+      {{- range .Density.Roles }}
+      {{- if .Flagged }}
+      <li><b>{{ .Title }} — {{ .Company }}</b>: {{ .Message }}</li>
+      {{- end }}
+      {{- end }}
+    </ul>
+    <p class="density-hint">{{ .Density.Total }} bullets total across {{ len .Density.Roles }} roles (budget {{ .Density.Budget }}). Counts are the canonical pool ({{ .ResumeVersion }}); trim in the working copy.</p>
+  </details>
+  {{- end }}
+
+  <form class="draft-form md-form" data-job="{{ .JobID }}" data-profile="{{ .Profile }}"
+        hx-target="#job-draft" hx-swap="innerHTML">
+    <input type="hidden" name="profile" value="{{ .Profile }}">
+    <input type="hidden" name="template" value="{{ .TemplateID }}">
+    <input type="hidden" name="resume_version" value="{{ .ResumeVersion }}">
+
+    <div class="cm">
+      <div class="cm-col">
+        <div class="cm-col-head"><b>Working copy</b> — this is what exports to PDF</div>
+        <div class="cm-mount" data-cm="left"></div>
+        <textarea name="markdown" class="resume-md cm-source" rows="20" spellcheck="false">{{ .BaseMarkdown }}</textarea>
+      </div>
+
+      <div class="cm-col">
+        {{- if .NoDraft }}
+        <div class="cm-col-head"><b>AI suggestions</b></div>
+        <div class="draft-empty">
+          <p>No AI tailoring for this job yet.</p>
+          <button type="button" class="draft-trigger"
+                  hx-post="/ui/jobs/{{ .JobID }}/draft"
+                  hx-include="closest form"
+                  hx-indicator="#draft-spinner"
+                  hx-disabled-elt="this">
+            ✨ Tailor with AI (~60s)
+          </button>
+          <span id="draft-spinner" class="htmx-indicator">tailoring against the job description…</span>
+          <div class="draft-hint">DeepSeek reads the job description and proposes cuts and rewrites against the <b>{{ .TemplateName }}</b> template. Suggestions land here, editable — nothing touches your working copy until you apply them.</div>
+        </div>
+        {{- else }}
+        <div class="cm-col-head"><b>AI suggestions</b> — editable; ‹ a hunk into the working copy, or apply all below</div>
+        <div class="cm-mount" data-cm="right"></div>
+        <textarea name="tailored" class="resume-md cm-source" rows="20" spellcheck="false">{{ .TailoredMarkdown }}</textarea>
+        <div class="md-right-actions">
+          <button type="button" class="alt"
+                  hx-post="/ui/jobs/{{ .JobID }}/apply-ai"
+                  hx-include="closest form">
+            ← Apply all to working copy
+          </button>
+          <button type="button" class="small secondary"
+                  hx-post="/ui/jobs/{{ .JobID }}/draft"
+                  hx-include="closest form"
+                  hx-confirm="Re-tailor? This calls DeepSeek again (~60s) and replaces your edits here."
+                  hx-indicator="#draft-spinner"
+                  hx-disabled-elt="this">
+            ↻ re-tailor
+          </button>
+          <span id="draft-spinner" class="htmx-indicator">tailoring…</span>
+        </div>
+        {{- end }}
+      </div>
+
+      <div class="cmgutter"></div>
+    </div>
+
+    <div class="draft-actions">
+      {{- /* Saves in place: the confirmation swaps into #save-status next to
+             the button, the editor (and any unsaved typing) stays put. */}}
+      <button type="button" class="draft-finalize"
+              hx-post="/ui/jobs/{{ .JobID }}/generate"
+              hx-include="closest form"
+              hx-target="#save-status" hx-swap="innerHTML">💾 Save résumé</button>
+      <span id="save-status" class="save-status"></span>
+      {{- /* Native submit (not htmx): posts the same form to the PDF route,
+             which saves then streams the PDF into a new tab. */}}
+      <button type="submit" class="alt"
+              formaction="/ui/jobs/{{ .JobID }}/resume.pdf"
+              formmethod="post" formtarget="_blank">📄 Generate PDF ↗</button>
+      {{- if .HasSaved }}
+      <a class="generate-preview" target="_blank" rel="noopener"
+         href="/ui/jobs/{{ .JobID }}/resume.pdf?profile={{ .Profile }}">View saved PDF ↗</a>
+      {{- end }}
+      {{- /* SCD2 version history of the working copy — populated by resume_diff.js
+             (hidden until at least one saved version exists). */}}
+      <label class="ver-pick" style="display:none">Version
+        <select></select>
+      </label>
+      <button type="button" class="small restore-btn" style="display:none">↩ Restore</button>
+      <span class="md-spacer"></span>
+      <input type="text" name="name" class="tpl-name" placeholder="New template name…">
+      <button type="button" class="small"
+              hx-post="/ui/jobs/{{ .JobID }}/save-template"
+              hx-include="closest form">Save as new template</button>
+      {{- if .ReplaceTargets }}
+      <select name="target_template" class="tpl-select">
+        {{- range .ReplaceTargets }}
+        <option value="{{ .ID }}">{{ .Name }}{{ if .IsDefault }} (default){{ end }}</option>
+        {{- end }}
+      </select>
+      <button type="button" class="small secondary"
+              hx-post="/ui/jobs/{{ .JobID }}/replace-template"
+              hx-include="closest form"
+              hx-confirm="Overwrite the selected template with this markdown?">Replace template</button>
+      {{- end }}
+    </div>
+  </form>
 </div>

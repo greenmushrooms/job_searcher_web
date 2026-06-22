@@ -1,0 +1,43 @@
+# job_searcher_web — single Go service that serves both the JSON API and the
+# htmx UI on :7770. It does NOT run its own Postgres: it joins the shared
+# `project-hub-network` and talks to the existing `hub_db` container, where the
+# `job_searcher` database (live pipeline data in public.*, user state in web.*)
+# already lives alongside the other hub projects.
+#
+#   docker compose up -d --build
+#   → http://localhost:7770/
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    image: job_searcher_web
+    container_name: job_searcher_web
+    restart: unless-stopped
+
+    # DB_NAME / DB_USER / DB_PASSWORD / DEEPSEEK_* come from .env; the values
+    # below override the host-oriented defaults in .env for the container.
+    env_file: .env
+    environment:
+      DB_HOST: hub_db          # DNS alias of the shared Postgres container
+      DB_PORT: "5432"
+      HTTP_ADDR: ":7770"
+      WEB_DIR: /app/web
+      # resume_htmx (PDF render) runs on the host, not in this network. Reach
+      # it via the host gateway; finalize-to-PDF is optional, draft works without.
+      RESUME_HTMX_URL: http://host.docker.internal:5050
+
+    ports:
+      - "7770:7770"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - project-hub-network
+
+# Created and owned by the hub_db stack; we only attach to it.
+networks:
+  project-hub-network:
+    external: true

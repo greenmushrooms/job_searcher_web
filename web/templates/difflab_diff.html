@@ -1,0 +1,15 @@
+{{- /* Server-rendered, line-aligned résumé diff for the zero-JS /v4 lab. The
+       data is []resumediff.RenderRow. One <tr> per aligned row: a fixed-layout
+       table makes both cells of a row share a height, so wrapped lines stay
+       aligned with no spacer math. Rendered both for the initial page (embedded
+       in difflab.html) and on every recompute (POST /ui/difflab/diff). */ -}}
+{{- define "difflab_diff" -}}
+<table class="dl4-table">
+  {{- range . }}
+  <tr>
+    <td class="dlc{{ if .Left.Class }} dl-{{ .Left.Class }}{{ end }}{{ if .Left.Blank }} dl-blank{{ end }}">{{ if .Left.HTML }}{{ .Left.HTML }}{{ else }} {{ end }}</td>
+    <td class="dlc{{ if .Right.Class }} dl-{{ .Right.Class }}{{ end }}{{ if .Right.Blank }} dl-blank{{ end }}">{{ if .Right.HTML }}{{ .Right.HTML }}{{ else }} {{ end }}</td>
+  </tr>
+  {{- end }}
+</table>
+{{- end -}}

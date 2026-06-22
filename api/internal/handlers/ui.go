@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/applications"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 )
 
@@ -20,6 +21,7 @@ type statusRowView struct {
 	JobID      string
 	SysProfile string
 	Status     string
+	Final      string // "" == still open; else terminal outcome (rejected/offer)
 	Notes      string
 	UpdatedAt  string
 }
@@ -34,9 +36,7 @@ type statusRowView struct {
 func (h *UIHandler) StatusRow(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	status, notesStr, profile := parseStatusInputs(r)
-	if profile == "" {
-		profile = "Slava"
-	}
+	profile = profiles.Resolve(r.Context(), profile)
 	var notes *string
 	if notesStr != "" {
 		notes = &notesStr
@@ -60,6 +60,9 @@ func (h *UIHandler) StatusRow(w http.ResponseWriter, r *http.Request) {
 		SysProfile: app.SysProfile,
 		Status:     app.Status,
 		UpdatedAt:  app.UpdatedAt,
+	}
+	if app.FinalStatus != nil {
+		view.Final = *app.FinalStatus
 	}
 	if app.Notes != nil {
 		view.Notes = *app.Notes

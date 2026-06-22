@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>draft harness — job_searcher_web</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/json-enc.js"></script>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 1300px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { margin: 0 0 .25rem; }
+  .sub { color: #666; margin-bottom: 1.25rem; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end; margin-bottom: 1rem; padding: .75rem 1rem; background: #f7f7f8; border-radius: 6px; }
+  .controls label { display: flex; flex-direction: column; gap: .2rem; font-size: 12px; color: #555; }
+  input, select { padding: .35rem .5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+  button { padding: .45rem .9rem; background: #1a4ed8; color: white; border: 0; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #1340b5; }
+  button.secondary { background: #555; }
+  button.secondary:hover { background: #333; }
+  button.small { padding: .25rem .55rem; font-size: 12px; }
+
+  .layout { display: grid; grid-template-columns: 360px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .job-list { border: 1px solid #e3e3e3; border-radius: 6px; max-height: 80vh; overflow-y: auto; }
+  .job-row { padding: .55rem .75rem; border-bottom: 1px solid #eee; cursor: pointer; }
+  .job-row:last-child { border-bottom: 0; }
+  .job-row:hover { background: #f7f7f8; }
+  .job-row.active { background: #eaf0ff; }
+  .job-row .title { font-weight: 600; margin-bottom: .15rem; }
+  .job-row .meta { color: #666; font-size: 11px; }
+  .job-row .score { float: right; color: #0a7d2e; font-weight: 600; }
+
+  /* summary panel */
+  .summary { border: 1px solid #e3e3e3; border-radius: 6px; padding: .9rem 1.1rem; margin-bottom: 1rem; }
+  .summary .row1 { display: flex; gap: 1rem; align-items: baseline; }
+  .summary h2 { margin: 0; font-size: 17px; flex: 1; }
+  .summary h2 a { color: #1a4ed8; text-decoration: none; }
+  .summary h2 a:hover { text-decoration: underline; }
+  .summary .score-big { color: #0a7d2e; font-weight: 700; font-size: 20px; white-space: nowrap; }
+  .summary .verdict { display: inline-block; padding: 1px 6px; border-radius: 3px; background: #eef; color: #339; font-size: 11px; text-transform: uppercase; margin-left: .5rem; vertical-align: middle; }
+  .summary .meta { color: #666; font-size: 12px; margin: .3rem 0 .7rem; }
+  .summary .reasoning { font-size: 13px; line-height: 1.55; color: #333; }
+  .summary .reasoning-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .03em; margin-bottom: .15rem; }
+
+  /* draft fragment styles */
+  .draft-fragment { border: 1px solid #e3e3e3; border-radius: 6px; padding: 1rem 1.25rem; }
+  .draft-empty { color: #666; padding: .5rem 0; }
+  .draft-empty button { margin-top: .5rem; }
+  .draft-meta { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; padding-bottom: .75rem; border-bottom: 1px solid #eee; margin-bottom: 1rem; font-size: 12px; color: #555; }
+  .draft-meta b { color: #222; margin-right: .25rem; font-weight: 600; }
+  .draft-refresh { margin-left: auto; padding: .25rem .6rem; font-size: 12px; background: #888; }
+  .draft-role { border: 0; padding: 0; margin: 0 0 1.25rem; }
+  .draft-role legend { font-weight: 600; padding: 0; margin-bottom: .4rem; }
+  .role-company { color: #555; font-weight: 400; }
+  .role-dates { color: #888; font-weight: 400; font-size: 12px; }
+  .draft-bullet { display: grid; grid-template-columns: 24px 1fr; gap: .4rem .6rem; padding: .35rem .5rem; border-radius: 4px; cursor: pointer; }
+  .draft-bullet:hover { background: #f7f7f8; }
+  .draft-bullet[data-keep="false"] { opacity: .55; }
+  .draft-bullet input { margin-top: .25rem; }
+  .bullet-text { grid-column: 2; }
+  .bullet-reason { grid-column: 2; font-size: 12px; color: #777; font-style: italic; }
+  .draft-finalize { margin-top: 1rem; }
+  .htmx-indicator { display: none; color: #888; font-style: italic; margin-left: .5rem; }
+  .htmx-request .htmx-indicator { display: inline; }
+  #result { margin-top: 1rem; }
+  #result pre { background: #1e1e1e; color: #ddd; padding: .75rem 1rem; border-radius: 4px; font-size: 12px; overflow-x: auto; }
+  .empty { color: #999; padding: 1.5rem; text-align: center; }
+  .api-error { padding: .9rem 1rem; background: #fff5f5; border: 1px solid #f5c2c2; border-radius: 4px; color: #8a1a1a; font-size: 13px; }
+  .api-error .label { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; margin-bottom: .25rem; }
+  .api-error code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #fde2e2; padding: 1px 4px; border-radius: 2px; }
+  .api-error pre { margin: .4rem 0 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #5a1010; }
+</style>
+</head>
+<body>
+  <h1>draft fragment harness</h1>
+  <div class="sub">
+    Click a job on the left to see its summary + draft fragment. Date filters narrow the list.
+    Try <code>li-4377273640</code> + profile <code>SmokeTest2</code> for a populated draft example.
+  </div>
+
+  <div class="controls">
+    <label>profile (fragment lookup)
+      <select id="profile">
+        <option>Slava</option>
+        <option>SmokeTest2</option>
+        <option>Cait</option>
+        <option>Kezia</option>
+        <option>Ray</option>
+      </select>
+    </label>
+    <label>min score
+      <input type="number" id="min-score" value="6.9" step="0.1" min="0" max="10" style="width:64px">
+    </label>
+    <label>limit
+      <input type="number" id="limit" value="25" min="1" max="200" style="width:64px">
+    </label>
+    <label>date field
+      <select id="date-field">
+        <option value="eval">eval</option>
+        <option value="posted">posted</option>
+      </select>
+    </label>
+    <label>from
+      <input type="date" id="from">
+    </label>
+    <label>to
+      <input type="date" id="to">
+    </label>
+    <button id="reload-btn">Reload list</button>
+    <label style="margin-left:1rem">manual job id
+      <input type="text" id="job-id" placeholder="li-4377273640" style="min-width:160px">
+    </label>
+    <button id="load-btn" class="small">Load</button>
+  </div>
+
+  <div class="layout">
+    <div id="job-list" class="job-list">
+      <div class="empty">loading jobs…</div>
+    </div>
+
+    <div>
+      <div id="summary"></div>
+      <div id="draft-container">
+        <div class="draft-empty">Pick a job from the list.</div>
+      </div>
+      <div id="result"></div>
+    </div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let activeJobId = null;
+
+  $('reload-btn').addEventListener('click', loadJobs);
+  $('profile').addEventListener('change', () => {
+    if (activeJobId) loadFragment(activeJobId);
+  });
+  $('load-btn').addEventListener('click', () => {
+    const id = $('job-id').value.trim();
+    if (!id) { alert('enter a job id'); return; }
+    selectJob(id);
+  });
+  // Reload list when any list-affecting filter changes.
+  ['min-score','limit','date-field','from','to'].forEach(id => {
+    $(id).addEventListener('change', loadJobs);
+  });
+
+  loadJobs();
+
+  async function loadJobs() {
+    const params = new URLSearchParams({
+      // Job list uses the pipeline's primary profile ("Slava") — the harness
+      // profile selector controls which audit-log profile to read drafts
+      // under, not which jobs to list.
+      profile: 'Slava',
+      limit: $('limit').value,
+      min_score: $('min-score').value,
+      date_field: $('date-field').value,
+    });
+    const from = $('from').value, to = $('to').value;
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+
+    const list = $('job-list');
+    list.innerHTML = '<div class="empty">loading jobs…</div>';
+    const url = '/api/v1/jobs?' + params;
+    try {
+      const r = await fetch(url);
+      const data = await r.json().catch(() => null);
+      if (!r.ok || (data && data.error)) {
+        list.innerHTML = renderApiError('GET ' + url, r.status, data);
+        return;
+      }
+      renderJobList(data.jobs || []);
+    } catch (err) {
+      list.innerHTML = renderApiError('GET ' + url, 0, { error: String(err) });
+    }
+  }
+
+  function renderJobList(jobs) {
+    const list = $('job-list');
+    if (!jobs.length) { list.innerHTML = '<div class="empty">no jobs match these filters</div>'; return; }
+    list.innerHTML = jobs.map(j => `
+      <div class="job-row" data-job-id="${escapeHTML(j.id)}">
+        <span class="score">${j.score?.toFixed(1) ?? '—'}</span>
+        <div class="title">${escapeHTML(j.title || '(no title)')}</div>
+        <div class="meta">
+          ${escapeHTML(j.company || '')} · ${escapeHTML(j.location || '')}${j.is_remote ? ' · remote' : ''}
+          · posted ${j.date_posted || '?'} · evaluated ${j.eval_date?.slice(0,10) || '?'}
+        </div>
+      </div>
+    `).join('');
+    list.querySelectorAll('.job-row').forEach(row => {
+      row.addEventListener('click', () => selectJob(row.dataset.jobId));
+    });
+  }
+
+  function selectJob(jobId) {
+    activeJobId = jobId;
+    $('job-id').value = jobId;
+    $('job-list').querySelectorAll('.job-row').forEach(r => {
+      r.classList.toggle('active', r.dataset.jobId === jobId);
+    });
+    loadSummary(jobId);
+    loadFragment(jobId);
+  }
+
+  async function loadSummary(jobId) {
+    const out = $('summary');
+    out.innerHTML = '';
+    const url = `/api/v1/jobs/${encodeURIComponent(jobId)}`;
+    try {
+      const r = await fetch(url);
+      const data = await r.json().catch(() => null);
+      if (!r.ok || (data && data.error)) {
+        out.innerHTML = renderApiError('GET ' + url, r.status, data);
+        return;
+      }
+      out.innerHTML = renderSummary(data);
+    } catch (err) {
+      out.innerHTML = renderApiError('GET ' + url, 0, { error: String(err) });
+    }
+  }
+
+  function renderSummary(j) {
+    const verdict = j.reasoning?.verdict
+      ? `<span class="verdict">${escapeHTML(j.reasoning.verdict)}</span>` : '';
+    const titleLink = j.url
+      ? `<a href="${escapeHTML(j.url)}" target="_blank" rel="noopener">${escapeHTML(j.title || '(no title)')}</a>`
+      : escapeHTML(j.title || '(no title)');
+    const comp = j.compensation
+      ? `${j.compensation.min}–${j.compensation.max} ${j.compensation.currency || ''} ${j.compensation.interval || ''}`.trim()
+      : '';
+    const metaParts = [
+      escapeHTML(j.company || ''),
+      escapeHTML(j.location || '') + (j.is_remote ? ' · remote' : ''),
+      `posted ${j.date_posted || '?'}`,
+      `evaluated ${j.eval_date?.slice(0,10) || '?'}`,
+    ];
+    if (comp) metaParts.push(escapeHTML(comp));
+    const summary = j.reasoning?.summary
+      ? `<div class="reasoning-label">summary</div><div class="reasoning">${escapeHTML(j.reasoning.summary)}</div>` : '';
+    const techStack = j.reasoning?.tech_stack
+      ? `<div class="reasoning-label" style="margin-top:.5rem">tech stack</div><div class="reasoning">${escapeHTML(j.reasoning.tech_stack)}</div>` : '';
+
+    return `
+      <div class="summary">
+        <div class="row1">
+          <h2>${titleLink}${verdict}</h2>
+          <div class="score-big">${j.score?.toFixed(1) ?? '—'}</div>
+        </div>
+        <div class="meta">${metaParts.join(' · ')}</div>
+        ${summary}${techStack}
+      </div>
+    `;
+  }
+
+  function loadFragment(jobId) {
+    const profile = $('profile').value;
+    htmx.ajax('GET', `/ui/jobs/${encodeURIComponent(jobId)}/draft?profile=${encodeURIComponent(profile)}`, {
+      target: '#draft-container',
+      swap: 'innerHTML',
+    });
+  }
+
+  document.body.addEventListener('htmx:afterRequest', (e) => {
+    const url = e.detail.requestConfig?.path || '';
+    if (!url.includes('/finalize-resume')) return;
+    const out = $('result');
+    try {
+      const data = JSON.parse(e.detail.xhr.responseText);
+      out.innerHTML = `<h3>Finalized</h3><pre>${escapeHTML(JSON.stringify(data, null, 2))}</pre>`;
+    } catch {
+      out.innerHTML = `<pre>${escapeHTML(e.detail.xhr.responseText)}</pre>`;
+    }
+  });
+
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Render a structured API error so backend bugs are visible instead of being
+  // silently collapsed to "no results". status==0 means the fetch itself
+  // failed (network / CORS / aborted) before a response came back.
+  function renderApiError(req, status, data) {
+    const msg = (data && data.error) ? data.error : (data ? JSON.stringify(data) : '(no body)');
+    const statusLabel = status ? `HTTP ${status}` : 'no response';
+    return `<div class="api-error">
+      <div class="label">API error · ${escapeHTML(statusLabel)}</div>
+      <code>${escapeHTML(req)}</code>
+      <pre>${escapeHTML(msg)}</pre>
+    </div>`;
+  }
+
+  // Surface non-2xx responses from the htmx-driven draft fragment swap so a
+  // backend 500 shows up visibly instead of just leaving the previous fragment
+  // in place. htmx fires responseError for 4xx/5xx whose target is set.
+  document.body.addEventListener('htmx:responseError', (e) => {
+    const target = e.detail.target;
+    if (!target || target.id !== 'draft-container') return;
+    const xhr = e.detail.xhr;
+    let body = xhr.responseText || '';
+    let data = null;
+    try { data = JSON.parse(body); } catch { /* plain text */ }
+    target.innerHTML = renderApiError(
+      `${e.detail.requestConfig?.verb?.toUpperCase() || 'GET'} ${e.detail.requestConfig?.path || ''}`,
+      xhr.status,
+      data || { error: body || xhr.statusText },
+    );
+  });
+</script>
+</body>
+</html>

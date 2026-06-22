@@ -1,0 +1,55 @@
+{{- /* Template manager, swapped into #job-draft. Rename / set default / delete
+       each stored template. After a mutation this re-renders, plus an OOB
+       dropdown refresh (.Controls) when a job is open. The virtual "Full
+       résumé" isn't listed here — it's not stored and can't be edited. */ -}}
+<div class="template-manager">
+  <header class="tm-header">
+    <h3>Résumé templates — {{ .Profile }}</h3>
+    {{- if .JobID }}
+    <button type="button" class="small secondary"
+            hx-get="/ui/jobs/{{ .JobID }}/draft?profile={{ .Profile }}"
+            hx-target="#job-draft" hx-swap="innerHTML">
+      ← Back to draft
+    </button>
+    {{- end }}
+  </header>
+
+  {{- if not .Templates }}
+  <p class="muted">No saved templates yet. Tailor a résumé for a job and use
+    “Save as template” to create one.</p>
+  {{- else }}
+  <ul class="tm-list">
+    {{- range .Templates }}
+    <li class="tm-item">
+      <form class="tm-rename"
+            hx-post="/ui/resume/templates/{{ .ID }}/rename"
+            hx-target="#job-draft" hx-swap="innerHTML">
+        <input type="hidden" name="profile" value="{{ $.Profile }}">
+        <input type="hidden" name="job" value="{{ $.JobID }}">
+        <input type="text" name="name" value="{{ .Name }}" class="tm-name">
+        <button type="submit" class="small">Rename</button>
+      </form>
+      <span class="tm-flags">{{ if .IsDefault }}<span class="tm-default">default</span>{{ end }}</span>
+      <div class="tm-actions">
+        {{- if not .IsDefault }}
+        <button type="button" class="small"
+                hx-post="/ui/resume/templates/{{ .ID }}/default"
+                hx-vals='{"profile":"{{ $.Profile }}","job":"{{ $.JobID }}"}'
+                hx-target="#job-draft" hx-swap="innerHTML">
+          Set default
+        </button>
+        {{- end }}
+        <button type="button" class="small danger"
+                hx-post="/ui/resume/templates/{{ .ID }}/delete"
+                hx-vals='{"profile":"{{ $.Profile }}","job":"{{ $.JobID }}"}'
+                hx-target="#job-draft" hx-swap="innerHTML"
+                hx-confirm="Delete template “{{ .Name }}”?">
+          Delete
+        </button>
+      </div>
+    </li>
+    {{- end }}
+  </ul>
+  {{- end }}
+</div>
+{{- with .Controls }}{{ template "resume_controls" . }}{{ end }}

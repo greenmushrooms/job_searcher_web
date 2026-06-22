@@ -1,0 +1,18 @@
+{{- /* Swapped into #job-draft after POST /ui/jobs/{id}/save-template. The new
+       template is now in the dropdown (refreshed out-of-band below). */ -}}
+<div class="generate-ok">
+  <b>Saved template</b> “{{ .Name }}”.
+  <div class="generate-actions">
+    <button type="button" class="small"
+            hx-get="/ui/jobs/{{ .JobID }}/draft?profile={{ .Profile }}&template={{ .TemplateID }}"
+            hx-target="#job-draft" hx-swap="innerHTML">
+      Open this template
+    </button>
+    <button type="button" class="small secondary"
+            hx-get="/ui/jobs/{{ .JobID }}/draft?profile={{ .Profile }}&template=default"
+            hx-target="#job-draft" hx-swap="innerHTML">
+      Back to full résumé
+    </button>
+  </div>
+</div>
+{{ template "resume_controls" .Controls }}

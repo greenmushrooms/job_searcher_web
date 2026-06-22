@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,12 +13,17 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/applications"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/finalizations"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/handlers"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resumemaster"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
 func main() {
@@ -49,6 +55,13 @@ func main() {
 	appsRepo := applications.New(pool)
 	jobsRepo := jobs.New(pool)
 	finalsRepo := finalizations.New(pool)
+	coverRepo := coverletters.New(pool)
+	masterRepo := resumemaster.New(pool)
+	resumeRepo := resume.NewRepo(pool)
+	templatesRepo := templates.New(pool)
+
+	// Validate ?profile against the pipeline's known profiles (TTL-cached).
+	profiles.Init(jobsRepo)
 
 	dsClient, dsErr := deepseek.NewFromEnv()
 	if dsErr != nil {
@@ -58,9 +71,14 @@ func main() {
 	jh := &handlers.JobsHandler{Repo: jobsRepo}
 	ah := &handlers.ApplicationsHandler{Repo: appsRepo}
 	uh := &handlers.UIHandler{Repo: appsRepo, Renderer: renderer}
+	juh := &handlers.JobUIHandler{Jobs: jobsRepo, Apps: appsRepo, Templates: templatesRepo, Renderer: renderer}
 	rh := &handlers.ResumeHandler{
 		Jobs:          jobsRepo,
 		Finalizations: finalsRepo,
+		CoverLetters:  coverRepo,
+		Master:        masterRepo,
+		Resumes:       resumeRepo,
+		Templates:     templatesRepo,
 		DeepSeek:      dsClient,
 		Pool:          pool,
 		Renderer:      renderer,
@@ -86,9 +104,9 @@ func main() {
 			r.Post("/jobs/{id}/finalize-resume", rh.Finalize)
 		})
 		// LLM endpoint: DeepSeek-v4-pro for ~40 bullets typically takes
-		// 20-60s. 120s gives headroom without hanging indefinitely.
+		// 20-110s+. 180s gives headroom without hanging indefinitely.
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.Timeout(120 * time.Second))
+			r.Use(middleware.Timeout(180 * time.Second))
 			r.Post("/jobs/{id}/draft-resume", rh.Draft)
 		})
 	})
@@ -98,20 +116,75 @@ func main() {
 			r.Use(middleware.Timeout(30 * time.Second))
 			r.Post("/jobs/{id}/status-row", uh.StatusRow)
 			r.Get("/jobs/{id}/draft", rh.DraftFragment)
+			r.Post("/jobs/{id}/apply-ai", rh.ApplyAI)
+			r.Post("/jobs/{id}/generate", rh.GenerateResume)
+			r.Post("/jobs/{id}/save-template", rh.SaveTemplate)
+			r.Post("/jobs/{id}/replace-template", rh.ReplaceTemplate)
+			r.Get("/jobs/{id}/resume.pdf", rh.ResumePDF)
+			r.Post("/jobs/{id}/resume.pdf", rh.GeneratePDF)
+			r.Get("/jobs/{id}/resume/versions", rh.ResumeVersions)                 // SCD2 version history
+			r.Post("/jobs/{id}/resume/versions/{version}/restore", rh.RestoreResumeVersion)
+			r.Get("/jobs/{id}/cover-letter", rh.CoverLetterFragment)
+			r.Post("/jobs/{id}/cover-letter", rh.SaveCoverLetter)
+			r.Post("/jobs/{id}/cover-letter.pdf", rh.CoverLetterPDF)
+			r.Post("/resume/master", rh.SaveMaster) // diff lab: permanent master save
+			r.Post("/difflab/diff", rh.DiffLabCompute) // diff lab v4: zero-JS recompute
+
+			// Resume template manager (rename / delete / set default).
+			r.Get("/resume/templates", rh.TemplatesManager)
+			r.Post("/resume/templates/{templateID}/rename", rh.RenameTemplate)
+			r.Post("/resume/templates/{templateID}/delete", rh.DeleteTemplate)
+			r.Post("/resume/templates/{templateID}/default", rh.SetDefaultTemplate)
+
+			// Server-rendered job list + summary + apply/skip (OOB row update).
+			r.Get("/jobs", juh.JobList)
+			r.Get("/jobs/{id}/workspace", juh.JobWorkspace)
+			r.Get("/jobs/{id}/summary", juh.JobSummary)
+			r.Post("/jobs/{id}/row-status", juh.RowStatus)
+
+			// Left-hand canonical resume editor (htmx fragments).
+			r.Get("/resume", rh.ResumeEditor)
+			r.Post("/resume/bullets/{roleID}", rh.AddBullet)
+			r.Post("/resume/bullets/{roleID}/{bulletID}", rh.SaveBullet)
+			r.Post("/resume/bullets/{roleID}/{bulletID}/retire", rh.RemoveBullet)
 		})
-		// HTML trigger for a fresh DeepSeek draft — same 120s budget as the
-		// JSON endpoint above.
+		// HTML triggers that call DeepSeek — same 180s budget as the JSON
+		// endpoint above.
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.Timeout(120 * time.Second))
+			r.Use(middleware.Timeout(180 * time.Second))
 			r.Post("/jobs/{id}/draft", rh.DraftFragmentTrigger)
+			r.Post("/jobs/{id}/cover-letter/draft", rh.DraftCoverLetter)
 		})
 	})
 
-	r.Handle("/*", http.FileServer(http.Dir(webDir)))
+	// Land on the current résumé workspace (jobs.html) rather than the older
+	// index.html prototype.
+	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, "/jobs.html", http.StatusFound)
+	})
+
+	// Diff-lab comparison pages — highlighting variants of the two-pane
+	// master-vs-job résumé editor, to pick one. v4 is the zero-JS, server-
+	// rendered diff (no CodeMirror): it recomputes via POST /ui/difflab/diff.
+	r.Get("/v1", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v1") })
+	r.Get("/v2", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v2") })
+	r.Get("/v3", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v3") })
+	r.Get("/v4", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v4") })
+
+	// Serve web/ as static, but never the templates/ subdir — those are Go
+	// template sources rendered server-side, not public assets.
+	fs := http.FileServer(http.Dir(webDir))
+	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/templates/") {
+			http.NotFound(w, req)
+			return
+		}
+		fs.ServeHTTP(w, req)
+	}))
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
-		addr = ":8090"
+		addr = ":7770"
 	}
 	log.Printf("listening on %s (web=%s)", addr, webDir)
 	log.Fatal(http.ListenAndServe(addr, r))

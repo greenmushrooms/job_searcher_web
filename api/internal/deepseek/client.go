@@ -24,7 +24,31 @@ import (
 // PromptVersion is logged into every resume_drafted event so we can later
 // retro the LLM's behaviour against the exact prompt that produced it.
 // Bump when the prompt template, system instruction, or output schema changes.
-const PromptVersion = "v1"
+// v2: removals-only schema (was per-bullet keep/drop decisions).
+// v3: adds per-bullet rewrites alongside removals.
+// v4: rewrites must be concise resume-style fragments, not prose sentences.
+// v5: relevance guidance from the 2026-06-12 eval — judge by transferable
+//     competency not surface domain, awards keep-by-default, prune oldest
+//     roles hardest/consistently, reword toward the posting's stack without
+//     inventing tools.
+// v6: floor on rewrites — surface at least two or three of the strongest
+//     rewrite opportunities so a job far from the candidate's domain never
+//     comes back with a single suggestion. Removals stay conservative.
+// v7: relevance-first rewrites — replaces v6's count floor. Each rewrite's
+//     reason must name the specific posting requirement it serves (grammar/
+//     tense-only reasons are rejected), must foreground must-have tools the
+//     candidate genuinely has, and may use ONLY tools already present in the
+//     bullet text (no introducing/swapping tools). Quality over quantity.
+// v8: education entries can now be pruned. The model sees the education list
+//     and may drop SUPPLEMENTARY entries (professional exams, certifications,
+//     standalone courses) when clearly irrelevant to the posting. Degrees and
+//     diplomas are keep-by-default and never listed.
+// v9: per-role bullet budgets. Each role header carries a [N now — keep MIN–MAX]
+//     band (recency-tapered caps + a min-keep floor, shared with the density
+//     check in package resumesuggest). Removals are driven by the budget: trim a
+//     role over MAX to its strongest, never below MIN — replacing v2's blanket
+//     "be conservative" so dense roles actually get cut.
+const PromptVersion = "v9"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%
@@ -40,11 +64,31 @@ var modelPricing = map[string]pricing{
 	"deepseek-reasoner": {inputPer1M: 0.14, outputPer1M: 0.28},
 }
 
-type Decision struct {
+// Removal is one bullet the LLM recommends dropping for this job. Bullets not
+// listed in the draft's removals are kept by default — the render starts from
+// the full resume and treats removals as a diff over it.
+type Removal struct {
 	RoleID   string `json:"role_id"`
 	BulletID string `json:"bullet_id"`
-	Keep     bool   `json:"keep"`
 	Reason   string `json:"reason"`
+}
+
+// Rewrite is one bullet the LLM suggests rewording for this job. NewText is the
+// improved bullet; the original stays the source of truth until the user
+// accepts it. Bullets not listed keep their canonical text.
+type Rewrite struct {
+	RoleID   string `json:"role_id"`
+	BulletID string `json:"bullet_id"`
+	NewText  string `json:"new_text"`
+	Reason   string `json:"reason"`
+}
+
+// EducationRemoval is one SUPPLEMENTARY education entry the LLM recommends
+// dropping for this job (e.g. a professional exam or certification that's
+// irrelevant here). Degrees are never listed. Entries not listed are kept.
+type EducationRemoval struct {
+	EducationID string `json:"education_id"`
+	Reason      string `json:"reason"`
 }
 
 // Usage mirrors the chat-completions response.usage object.
@@ -56,10 +100,12 @@ type Usage struct {
 }
 
 type DraftResult struct {
-	Decisions     []Decision `json:"decisions"`
-	Usage         Usage      `json:"usage"`
-	Model         string     `json:"model"`
-	PromptVersion string     `json:"prompt_version"`
+	Removals          []Removal          `json:"removals"`
+	Rewrites          []Rewrite          `json:"rewrites"`
+	EducationRemovals []EducationRemoval `json:"education_removals"`
+	Usage             Usage              `json:"usage"`
+	Model             string             `json:"model"`
+	PromptVersion     string             `json:"prompt_version"`
 }
 
 type Client struct {
@@ -86,7 +132,9 @@ func NewFromEnv() (*Client, error) {
 		model = "deepseek-v4-pro"
 	}
 	return &Client{
-		HTTPClient: &http.Client{Timeout: 110 * time.Second},
+		// DeepSeek v4-pro on a ~40-bullet pool ranges 60–110s+; keep this just
+		// under the 180s route timeout so the route never wins the race.
+		HTTPClient: &http.Client{Timeout: 170 * time.Second},
 		APIKey:     key,
 		BaseURL:    strings.TrimRight(base, "/"),
 		Model:      model,
@@ -95,10 +143,11 @@ func NewFromEnv() (*Client, error) {
 
 var ErrNotConfigured = errors.New("DEEPSEEK_API_KEY not set")
 
-// Draft sends the job description + active bullet pool to the LLM and
-// returns per-bullet keep/drop decisions.
-func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []resume.Bullet) (*DraftResult, error) {
-	prompt := buildPrompt(jobDescription, bullets)
+// Draft sends the job description + active bullet pool (and supplementary
+// education entries) to the LLM and returns what it recommends removing or
+// rewriting for this job.
+func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []resume.Bullet, education []resume.DocEducation) (*DraftResult, error) {
+	prompt := buildPrompt(jobDescription, bullets, education)
 
 	reqBody := chatRequest{
 		Model: c.Model,
@@ -123,11 +172,13 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 	}
 
 	var parsed struct {
-		Decisions []Decision `json:"decisions"`
+		Removals          []Removal          `json:"removals"`
+		Rewrites          []Rewrite          `json:"rewrites"`
+		EducationRemovals []EducationRemoval `json:"education_removals"`
 	}
 	content := resp.Choices[0].Message.Content
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
-		return nil, fmt.Errorf("decode decisions JSON: %w (content=%s)", err, truncate(content, 500))
+		return nil, fmt.Errorf("decode draft JSON: %w (content=%s)", err, truncate(content, 500))
 	}
 
 	usage := Usage{
@@ -137,10 +188,12 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 		CostUSD:          estimateCost(c.Model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens),
 	}
 	return &DraftResult{
-		Decisions:     parsed.Decisions,
-		Usage:         usage,
-		Model:         c.Model,
-		PromptVersion: PromptVersion,
+		Removals:          parsed.Removals,
+		Rewrites:          parsed.Rewrites,
+		EducationRemovals: parsed.EducationRemovals,
+		Usage:             usage,
+		Model:             c.Model,
+		PromptVersion:     PromptVersion,
 	}, nil
 }
 

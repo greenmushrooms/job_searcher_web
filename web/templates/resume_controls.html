@@ -1,0 +1,22 @@
+{{- /* Template selector above the draft panel. Changing it reloads #job-draft
+       for the chosen template. Re-rendered with hx-swap-oob after saving or
+       managing templates so the dropdown stays in sync. */ -}}
+<div id="resume-controls" class="resume-controls"{{ if .OOB }} hx-swap-oob="true"{{ end }}>
+  <label class="rc-label">Résumé template:
+    <select name="template"
+            hx-get="/ui/jobs/{{ .JobID }}/draft"
+            hx-vals='{"profile":"{{ .Profile }}"}'
+            hx-target="#job-draft"
+            hx-trigger="change"
+            hx-swap="innerHTML">
+      {{- range .Templates }}
+      <option value="{{ .ID }}"{{ if eq .ID $.TemplateID }} selected{{ end }}>{{ .Name }}{{ if .IsDefault }} (default){{ end }}</option>
+      {{- end }}
+    </select>
+  </label>
+  <button type="button" class="rc-manage small secondary"
+          hx-get="/ui/resume/templates?profile={{ .Profile }}&job={{ .JobID }}"
+          hx-target="#job-draft" hx-swap="innerHTML">
+    Manage templates
+  </button>
+</div>
