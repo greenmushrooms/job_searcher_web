@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 )
 
@@ -130,26 +128,5 @@ func (r *Repo) Upsert(ctx context.Context, jobID, sysProfile, value string, note
 		return nil, fmt.Errorf("write event: %w", err)
 	}
 
-	return &app, nil
-}
-
-// Get returns the current application row for (jobID, sysProfile), or nil if none.
-func (r *Repo) Get(ctx context.Context, jobID, sysProfile string) (*Application, error) {
-	var app Application
-	err := r.q.QueryRow(ctx, `
-        SELECT job_id, sys_profile, status, final_status, final_at::text,
-               notes, created_at::text, updated_at::text
-        FROM web.job_review
-        WHERE job_id = $1 AND sys_profile = $2
-    `, jobID, sysProfile).Scan(
-		&app.JobID, &app.SysProfile, &app.Status, &app.FinalStatus, &app.FinalAt,
-		&app.Notes, &app.CreatedAt, &app.UpdatedAt,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
 	return &app, nil
 }

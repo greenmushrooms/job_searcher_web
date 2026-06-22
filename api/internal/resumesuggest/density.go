@@ -214,7 +214,7 @@ func verdict(r Report) string {
 	switch {
 	case overCount > 0 && r.OverBudget > 0:
 		return fmt.Sprintf("Too many bullets: %d role(s) over cap and %d over the %d-bullet page budget — trim ~%d.",
-			overCount, r.OverBudget, r.Budget, maxInt(r.TrimTotal, r.OverBudget))
+			overCount, r.OverBudget, r.Budget, max(r.TrimTotal, r.OverBudget))
 	case overCount > 0:
 		return fmt.Sprintf("Too many bullets in %d role(s) — trim ~%d to tighten.", overCount, r.TrimTotal)
 	case r.OverBudget > 0:
@@ -225,11 +225,4 @@ func verdict(r Report) string {
 	default:
 		return "Bullet density looks good."
 	}
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
