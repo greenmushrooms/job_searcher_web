@@ -43,7 +43,12 @@ import (
 //     and may drop SUPPLEMENTARY entries (professional exams, certifications,
 //     standalone courses) when clearly irrelevant to the posting. Degrees and
 //     diplomas are keep-by-default and never listed.
-const PromptVersion = "v8"
+// v9: per-role bullet budgets. Each role header carries a [N now — keep MIN–MAX]
+//     band (recency-tapered caps + a min-keep floor, shared with the density
+//     check in package resumesuggest). Removals are driven by the budget: trim a
+//     role over MAX to its strongest, never below MIN — replacing v2's blanket
+//     "be conservative" so dense roles actually get cut.
+const PromptVersion = "v9"
 
 // Pricing per 1M tokens, USD. Cache-miss prices (worst case). Updated 2026-05-25
 // from the DeepSeek pricing docs. Pricing is in flux (V4 launch had a 75%

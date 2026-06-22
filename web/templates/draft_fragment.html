@@ -21,6 +21,20 @@
   </header>
   {{- end }}
 
+  {{- if .Density.HasFindings }}
+  <details class="density-banner" open>
+    <summary>⚠ {{ .Density.Verdict }}</summary>
+    <ul class="density-list">
+      {{- range .Density.Roles }}
+      {{- if .Flagged }}
+      <li><b>{{ .Title }} — {{ .Company }}</b>: {{ .Message }}</li>
+      {{- end }}
+      {{- end }}
+    </ul>
+    <p class="density-hint">{{ .Density.Total }} bullets total across {{ len .Density.Roles }} roles (budget {{ .Density.Budget }}). Counts are the canonical pool ({{ .ResumeVersion }}); trim in the working copy.</p>
+  </details>
+  {{- end }}
+
   <form class="draft-form md-form" data-job="{{ .JobID }}" data-profile="{{ .Profile }}"
         hx-target="#job-draft" hx-swap="innerHTML">
     <input type="hidden" name="profile" value="{{ .Profile }}">

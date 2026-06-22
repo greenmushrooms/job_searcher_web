@@ -114,10 +114,17 @@ function computeDiff(aText, bText) {
     const ops = alignGap(Lidx, Ridx, A, B);
     let bd = [], ba = [];
     function flush() {
-      const k = Math.min(bd.length, ba.length);
-      for (let t = 0; t < k; t++) rows.push({ l: bd[t], r: ba[t], kind: 'replace' });
-      for (let t = k; t < bd.length; t++) rows.push({ l: bd[t], r: -1, kind: 'del' });
-      for (let t = k; t < ba.length; t++) rows.push({ l: -1, r: ba[t], kind: 'add' });
+      // Pair a deletion with an addition into one side-by-side "replace" row
+      // ONLY for a clean 1-for-1 swap (a single line rewritten wholesale). With
+      // more than one deletion or addition buffered, index pairing is arbitrary
+      // — a deleted line stacked above an edited one would merge into a single
+      // change — so emit each as its own row and keep the changes distinct.
+      if (bd.length === 1 && ba.length === 1) {
+        rows.push({ l: bd[0], r: ba[0], kind: 'replace' });
+      } else {
+        for (const d of bd) rows.push({ l: d, r: -1, kind: 'del' });
+        for (const a of ba) rows.push({ l: -1, r: a, kind: 'add' });
+      }
       bd = []; ba = [];
     }
     for (const op of ops) {

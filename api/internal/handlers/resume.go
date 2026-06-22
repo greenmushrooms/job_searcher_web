@@ -20,6 +20,7 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resumemaster"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resumesuggest"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
@@ -28,11 +29,11 @@ type ResumeHandler struct {
 	Finalizations *finalizations.Repo
 	CoverLetters  *coverletters.Repo
 	Master        *resumemaster.Repo // permanent master résumé markdown (diff lab)
-	Resumes       *resume.Repo     // writes to the canonical resume (left editor)
-	Templates     *templates.Repo  // reusable resume variants
-	DeepSeek      *deepseek.Client // may be nil if not configured
-	Pool          *pgxpool.Pool    // for writing resume_drafted event directly
-	Renderer      *render.Renderer // for /ui/* HTML fragments
+	Resumes       *resume.Repo       // writes to the canonical resume (left editor)
+	Templates     *templates.Repo    // reusable resume variants
+	DeepSeek      *deepseek.Client   // may be nil if not configured
+	Pool          *pgxpool.Pool      // for writing resume_drafted event directly
+	Renderer      *render.Renderer   // for /ui/* HTML fragments
 }
 
 type draftRequestBody struct {
@@ -499,23 +500,27 @@ func (h *ResumeHandler) templateMutation(w http.ResponseWriter, r *http.Request,
 // pane is an editable copy of the AI-tailored markdown (TailoredMarkdown). The
 // live diff between the two is rendered client-side by web/resume_diff.js.
 type draftFragmentView struct {
-	JobID            string
-	Profile          string
-	TemplateID       string
-	TemplateName     string // display name for the selected template
-	NoDraft          bool   // no AI draft yet → right pane shows the trigger
-	BaseMarkdown     string // left textarea content
-	TailoredMarkdown string // payload for "Apply AI suggestions"
-	HasSaved         bool   // a generated resume exists → show Preview PDF
-	Model            string
-	ResumeVersion    string
-	DraftedAt        string
-	CostUSD          float64
+	JobID                string
+	Profile              string
+	TemplateID           string
+	TemplateName         string // display name for the selected template
+	NoDraft              bool   // no AI draft yet → right pane shows the trigger
+	BaseMarkdown         string // left textarea content
+	TailoredMarkdown     string // payload for "Apply AI suggestions"
+	HasSaved             bool   // a generated resume exists → show Preview PDF
+	Model                string
+	ResumeVersion        string
+	DraftedAt            string
+	CostUSD              float64
 	RemovedCount         int
 	RewriteCount         int
 	EducationPrunedCount int
 	TotalCount           int
 	ReplaceTargets       []templateOpt // stored templates for the "Replace" dropdown
+	// Density is the deterministic "too many points per job" check over the
+	// canonical bullet pool — surfaced as a banner above the panes, independent
+	// of any AI draft.
+	Density resumesuggest.Report
 }
 
 // markdownFragment assembles the two-pane view. The right pane is an editable
@@ -543,6 +548,7 @@ func (h *ResumeHandler) markdownFragment(ctx context.Context, jobID, profile, te
 		ResumeVersion: res.Version,
 		TotalCount:    len(res.Bullets),
 		NoDraft:       payload == nil,
+		Density:       resumesuggest.Analyze(resumesuggest.FromBullets(res.Bullets), resumesuggest.DefaultLimits),
 	}
 
 	if payload != nil {
@@ -682,9 +688,9 @@ func (h *ResumeHandler) ApplyAI(w http.ResponseWriter, r *http.Request) {
 // for resume_drafted, mirrored here so both the writer and the fragment reader
 // agree on field names.
 type draftedEventPayload struct {
-	PromptVersion string             `json:"prompt_version"`
-	Model         string             `json:"model"`
-	ResumeVersion string             `json:"resume_version"`
+	PromptVersion     string                      `json:"prompt_version"`
+	Model             string                      `json:"model"`
+	ResumeVersion     string                      `json:"resume_version"`
 	CostUSD           float64                     `json:"cost_usd"`
 	BulletCount       int                         `json:"bullet_count"`
 	Removals          []deepseek.Removal          `json:"removals"`
@@ -724,6 +730,57 @@ type handlerErr struct {
 	msg    string
 }
 
+// buildRoleScores folds the flat bullet pool (canonical order) plus the flat
+// score list into per-role scored bullets for resumesuggest.Select.
+func buildRoleScores(bullets []resume.Bullet, scores []deepseek.BulletScore) []resumesuggest.RoleScores {
+	scoreOf := make(map[string]int, len(scores))
+	for _, s := range scores {
+		scoreOf[s.RoleID+"."+s.BulletID] = s.Score
+	}
+	var roles []resumesuggest.RoleScores
+	idx := map[string]int{}
+	for _, b := range bullets {
+		i, ok := idx[b.RoleID]
+		if !ok {
+			i = len(roles)
+			idx[b.RoleID] = i
+			roles = append(roles, resumesuggest.RoleScores{RoleID: b.RoleID})
+		}
+		roles[i].Bullets = append(roles[i].Bullets, resumesuggest.ScoredBullet{BulletID: b.BulletID, Score: scoreOf[b.CompositeID()]})
+	}
+	return roles
+}
+
+// scoreRemovals turns the selection's cut set into removal records, in canonical
+// order, each carrying the score that lost it its slot.
+func scoreRemovals(bullets []resume.Bullet, sel resumesuggest.Selection) []deepseek.Removal {
+	var out []deepseek.Removal
+	for _, b := range bullets {
+		id := b.CompositeID()
+		if sel.IsKept(id) {
+			continue
+		}
+		out = append(out, deepseek.Removal{
+			RoleID:   b.RoleID,
+			BulletID: b.BulletID,
+			Reason:   fmt.Sprintf("relevance %d — below this role's keep cut for the posting", sel.ScoreOf[id]),
+		})
+	}
+	return out
+}
+
+// keptRewrites drops any rewrite that targets a cut bullet — only rewrites on
+// kept bullets reach the résumé.
+func keptRewrites(rewrites []deepseek.Rewrite, sel resumesuggest.Selection) []deepseek.Rewrite {
+	var out []deepseek.Rewrite
+	for _, rw := range rewrites {
+		if sel.IsKept(rw.RoleID + "." + rw.BulletID) {
+			out = append(out, rw)
+		}
+	}
+	return out
+}
+
 // draftAndPersist runs the LLM call and writes the resume_drafted event.
 // Returns (draft, resume, eventErr, handlerErr). handlerErr is non-nil when
 // the request itself should fail; eventErr is non-nil when the draft
@@ -761,18 +818,41 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		return nil, nil, nil, &handlerErr{http.StatusBadGateway, "deepseek: " + err.Error()}
 	}
 
+	// v10: relevance scoring governs removals. The calibrated flash scorer
+	// (deepseek.ScoreBullets, "A_clean" prompt) ranks every bullet against the
+	// posting; the clamp(count≥threshold, floor, cap) rule in resumesuggest
+	// picks the keep set, replacing the tailoring prompt's deliberately
+	// conservative removals. Rewrites are filtered to the kept set — rewriting a
+	// bullet we're about to cut is wasted. Best-effort: a scorer failure leaves
+	// the prompt's own removals/rewrites in place so a draft still works.
+	jobText := *job.Description
+	if job.Title != nil && *job.Title != "" {
+		jobText = *job.Title + "\n" + *job.Description
+	}
+	var scores []deepseek.BulletScore
+	if sc, serr := h.DeepSeek.ScoreBullets(ctx, jobText, res.Bullets); serr == nil && len(sc) > 0 {
+		scores = sc
+		sel := resumesuggest.Select(buildRoleScores(res.Bullets, sc), resumesuggest.DefaultLimits, resumesuggest.DefaultThreshold, resumesuggest.DefaultImportantThreshold)
+		draft.Removals = scoreRemovals(res.Bullets, sel)
+		draft.Rewrites = keptRewrites(draft.Rewrites, sel)
+	}
+
 	payload, _ := json.Marshal(map[string]any{
-		"prompt_version":     draft.PromptVersion,
-		"model":              draft.Model,
-		"resume_version":     res.Version,
-		"prompt_tokens":      draft.Usage.PromptTokens,
-		"completion_tokens":  draft.Usage.CompletionTokens,
-		"total_tokens":       draft.Usage.TotalTokens,
-		"cost_usd":           draft.Usage.CostUSD,
-		"bullet_count":       len(res.Bullets),
-		"removals":           draft.Removals,
-		"rewrites":           draft.Rewrites,
-		"education_removals": draft.EducationRemovals,
+		"prompt_version":      draft.PromptVersion,
+		"scorer_version":      deepseek.ScorerVersion,
+		"relevance_threshold": resumesuggest.DefaultThreshold,
+		"important_threshold": resumesuggest.DefaultImportantThreshold,
+		"model":               draft.Model,
+		"resume_version":      res.Version,
+		"prompt_tokens":       draft.Usage.PromptTokens,
+		"completion_tokens":   draft.Usage.CompletionTokens,
+		"total_tokens":        draft.Usage.TotalTokens,
+		"cost_usd":            draft.Usage.CostUSD,
+		"bullet_count":        len(res.Bullets),
+		"removals":            draft.Removals,
+		"rewrites":            draft.Rewrites,
+		"education_removals":  draft.EducationRemovals,
+		"scores":              scores,
 	})
 	_, eventErr := h.Pool.Exec(ctx, `
         INSERT INTO web.application_events (sys_profile, job_id, event_type, payload)

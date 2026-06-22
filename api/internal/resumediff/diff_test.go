@@ -101,6 +101,25 @@ func TestDissimilarReplaceNotWordDiffed(t *testing.T) {
 	}
 }
 
+func TestDeleteStackedOnEditNotMerged(t *testing.T) {
+	// A removed line sitting above a wholesale-rewritten line must NOT be paired
+	// into a single "replace" row with the rewrite's new text — a delete and an
+	// edit are two independent changes and must render as separate rows. (The
+	// old index-pairing merged the first delete with the first add.)
+	a := "- keep this line\n- alpha bravo charlie delta\n- echo foxtrot golf hotel"
+	b := "- keep this line\n- zulu yankee xray whiskey"
+	got := kinds(a, b)
+	want := []string{"same", "del", "del", "add"}
+	if !eqStr(got, want) {
+		t.Fatalf("kinds = %v, want %v (delete + edit must not merge into one replace)", got, want)
+	}
+	for _, r := range Render(a, b) {
+		if r.Left.Class == "del" && r.Right.Class == "add" {
+			t.Fatalf("unrelated delete and add merged into one replace row: %+v", r)
+		}
+	}
+}
+
 func TestMultibyteWordOffsets(t *testing.T) {
 	// Em dashes (—) are multibyte; rune-based offsets must keep the highlight
 	// aligned to the changed word and produce valid, escaped HTML.

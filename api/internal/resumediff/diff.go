@@ -106,15 +106,21 @@ func computeRows(A, B []string) []row {
 		ops := alignGap(Lidx, Ridx, A, B)
 		var bd, ba []int
 		flush := func() {
-			k := min(len(bd), len(ba))
-			for t := 0; t < k; t++ {
-				rows = append(rows, row{bd[t], ba[t], "replace"})
-			}
-			for t := k; t < len(bd); t++ {
-				rows = append(rows, row{bd[t], -1, "del"})
-			}
-			for t := k; t < len(ba); t++ {
-				rows = append(rows, row{-1, ba[t], "add"})
+			// Pair a deletion with an addition into one side-by-side "replace"
+			// row ONLY for a clean 1-for-1 swap (a single line rewritten
+			// wholesale). With more than one deletion or addition buffered, the
+			// index pairing is arbitrary — e.g. a deleted line stacked above an
+			// edited one would merge into a single change — so emit each as its
+			// own row and keep the two changes distinct.
+			if len(bd) == 1 && len(ba) == 1 {
+				rows = append(rows, row{bd[0], ba[0], "replace"})
+			} else {
+				for _, d := range bd {
+					rows = append(rows, row{d, -1, "del"})
+				}
+				for _, a := range ba {
+					rows = append(rows, row{-1, a, "add"})
+				}
 			}
 			bd, ba = nil, nil
 		}
