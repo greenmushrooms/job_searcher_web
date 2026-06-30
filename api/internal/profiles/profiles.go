@@ -74,13 +74,22 @@ func known(ctx context.Context) map[string]bool {
 	return set
 }
 
-// Valid reports whether p is a known profile. Empty is not valid.
+// Valid reports whether p is a known profile. Empty is not valid. On a pinned
+// (isolated) request, only the pinned profile is valid.
 func Valid(ctx context.Context, p string) bool {
+	if pinned, ok := Pinned(ctx); ok {
+		return p == pinned
+	}
 	return p != "" && known(ctx)[p]
 }
 
-// Known returns the sorted list of known profiles, for error messages.
+// Known returns the sorted list of known profiles, for error messages and the
+// UI profile switcher. On a pinned request it lists only the pinned profile, so
+// the switcher collapses to a single option and other profiles aren't leaked.
 func Known(ctx context.Context) []string {
+	if pinned, ok := Pinned(ctx); ok {
+		return []string{pinned}
+	}
 	set := known(ctx)
 	out := make([]string, 0, len(set))
 	for p := range set {
@@ -92,8 +101,15 @@ func Known(ctx context.Context) []string {
 
 // Resolve returns p if it is a known profile, otherwise the default. Used by
 // the htmx UI, where silently falling back is friendlier than erroring in the
-// middle of a fragment swap.
+// middle of a fragment swap. On a pinned (isolated) request it always returns
+// the pinned profile, ignoring p — this is how an out-of-scope ?profile= is
+// forced back to the user's own profile. The pinned profile is returned as-is
+// (never falls back to Default) so an as-yet-unevaluated profile shows its own
+// empty namespace rather than leaking the default profile's data.
 func Resolve(ctx context.Context, p string) string {
+	if pinned, ok := Pinned(ctx); ok {
+		return pinned
+	}
 	if p == "" {
 		return Default
 	}

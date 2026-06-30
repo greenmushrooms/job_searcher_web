@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 )
 
 type JobsHandler struct {
@@ -25,7 +26,9 @@ func (h *JobsHandler) List(w http.ResponseWriter, r *http.Request) {
 		To:        q.Get("to"),
 		DateField: q.Get("date_field"),
 	}
-	if p.Profile == "" {
+	if pinned, ok := profiles.Pinned(r.Context()); ok {
+		p.Profile = pinned // isolated request: ignore any ?profile=
+	} else if p.Profile == "" {
 		p.Profile = "Slava"
 	}
 	if p.DateField == "" {
@@ -88,6 +91,10 @@ func (h *JobsHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *JobsHandler) Profiles(w http.ResponseWriter, r *http.Request) {
+	if pinned, ok := profiles.Pinned(r.Context()); ok {
+		writeJSON(w, http.StatusOK, map[string]any{"profiles": []string{pinned}})
+		return
+	}
 	out, err := h.Repo.Profiles(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -97,12 +104,15 @@ func (h *JobsHandler) Profiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *JobsHandler) About(w http.ResponseWriter, r *http.Request) {
-	profiles, _ := h.Repo.Profiles(r.Context())
+	profileList, _ := h.Repo.Profiles(r.Context())
+	if pinned, ok := profiles.Pinned(r.Context()); ok {
+		profileList = []string{pinned}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":              "job_searcher_web",
 		"version":           "1",
 		"description":       "User-facing API on top of the job_searcher_2 pipeline. Reads public.* (pipeline), writes web.* (user state).",
-		"profiles":          profiles,
+		"profiles":          profileList,
 		"default_min_score": 6.9,
 		"endpoints": []map[string]string{
 			{"method": "GET", "path": "/api/v1/about"},

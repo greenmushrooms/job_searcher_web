@@ -60,12 +60,11 @@ func (h *ResumeHandler) Draft(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	var body draftRequestBody
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.Profile == "" {
-		body.Profile = profiles.Default
-	} else if !profiles.Valid(r.Context(), body.Profile) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unknown profile", "valid": profiles.Known(r.Context())})
+	prof, ok := resolveWriteProfile(w, r, body.Profile)
+	if !ok {
 		return
 	}
+	body.Profile = prof
 
 	draft, res, eventErr, herr := h.draftAndPersist(r.Context(), jobID, body.Profile, resume.DefaultTemplateID)
 	if herr != nil {
@@ -109,12 +108,11 @@ func (h *ResumeHandler) Finalize(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.Profile == "" {
-		body.Profile = profiles.Default
-	} else if !profiles.Valid(r.Context(), body.Profile) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unknown profile", "valid": profiles.Known(r.Context())})
+	prof, ok := resolveWriteProfile(w, r, body.Profile)
+	if !ok {
 		return
 	}
+	body.Profile = prof
 	if body.KeptBulletIDs == nil {
 		writeErr(w, http.StatusBadRequest, "kept_bullet_ids required (use [] to keep nothing)")
 		return
