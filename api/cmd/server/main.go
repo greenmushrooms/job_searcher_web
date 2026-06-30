@@ -63,6 +63,18 @@ func main() {
 	// Validate ?profile against the pipeline's known profiles (TTL-cached).
 	profiles.Init(jobsRepo)
 
+	// Per-user profile isolation. PROFILE_ACCESS maps the proxy's Remote-User to
+	// the one profile that account may see (e.g. "slava:Slava,kezia:Kezia").
+	// Unset => no isolation (local dev). See handlers.RestrictProfile for the
+	// trust model.
+	access, err := handlers.ParseProfileAccess(os.Getenv("PROFILE_ACCESS"))
+	if err != nil {
+		log.Fatalf("PROFILE_ACCESS: %v", err)
+	}
+	if len(access) > 0 {
+		log.Printf("profile isolation enabled for %d account(s)", len(access))
+	}
+
 	dsClient, dsErr := deepseek.NewFromEnv()
 	if dsErr != nil {
 		log.Printf("deepseek: %v (resume tailoring endpoints will return 503)", dsErr)
@@ -89,6 +101,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(handlers.RestrictProfile(access)) // per-user profile isolation (no-op when unset)
 	// No global Timeout — set per-group below. chi's Timeout middleware
 	// applies the shortest deadline when nested, so a global default would
 	// shadow any longer per-route override.
