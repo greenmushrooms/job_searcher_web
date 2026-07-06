@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>import résumé — {{ .Profile }}</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 720px; margin: 1.5rem auto; padding: 0 1rem; color: #222; background: #fff; }
+  h1 { font-size: 20px; margin: 0 0 .25rem; }
+  .sub { color: #666; font-size: 12px; margin-bottom: 1.2rem; }
+  .sub a { color: #1a4ed8; }
+  label { display: block; font-size: 12px; color: #52514e; font-weight: 600; margin: 1rem 0 .25rem; }
+  label .hint { font-weight: 400; color: #898781; }
+  textarea { box-sizing: border-box; width: 100%; font: 13px/1.5 ui-monospace, monospace; padding: .6rem .7rem; border: 1px solid #ccc; border-radius: 5px; min-height: 22em; resize: vertical; }
+  button { margin-top: 1.1rem; padding: .45rem 1.1rem; background: #1a4ed8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-size: 13.5px; }
+  button:hover { background: #1340b5; }
+  .replace { margin-top: .9rem; font-size: 13px; color: #7a4a00; background: #fdf6e3; border: 1px solid #f0c36d; border-radius: 6px; padding: .6rem .8rem; }
+  .replace input { vertical-align: -1px; margin-right: .35rem; }
+  .note { font-size: 11.5px; color: #898781; margin-top: .8rem; }
+  .err { color: #b00020; font-weight: 600; font-size: 13px; margin-top: .8rem; }
+  .ok { color: #0a7d2e; background: #f2faf4; border: 1px solid #bfe3c8; border-radius: 6px; padding: .8rem 1rem; font-size: 13.5px; margin-bottom: 1.2rem; }
+  .ok b { font-variant-numeric: tabular-nums; }
+  .ok .next { color: #333; font-weight: 400; margin-top: .4rem; font-size: 12.5px; }
+  .busy { display: none; color: #52514e; font-size: 12.5px; margin-top: .6rem; }
+</style>
+</head>
+<body>
+  <h1>import résumé — {{ .Profile }}</h1>
+  <div class="sub">
+    Paste a résumé in any form (text from Word, a PDF, or markdown) ·
+    <a href="/jobs.html">← jobs</a> · <a href="/settings">search settings</a>
+  </div>
+
+  {{ if .Done }}
+  <div class="ok">
+    ✓ Résumé imported for <b>{{ .Profile }}</b>: <b>{{ .Counts.Roles }}</b> roles,
+    <b>{{ .Counts.Bullets }}</b> bullets, <b>{{ .Counts.Skills }}</b> skills,
+    <b>{{ .Counts.Education }}</b> education entries, and the master document.
+    <div class="next">It's live now: the tailoring workspace on the
+      <a href="/jobs.html">jobs page</a> will draft against these bullets, and the
+      master is editable in any job's résumé pane.</div>
+  </div>
+  {{ end }}
+
+  <form method="post" action="/resume/ingest" onsubmit="document.querySelector('.busy').style.display='block'; this.querySelector('button').disabled=true">
+    <input type="hidden" name="profile" value="{{ .Profile }}">
+
+    <label>Résumé text <span class="hint">— contact, summary, experience, skills, education; formatting doesn't matter</span></label>
+    <textarea name="resume" spellcheck="false" placeholder="Jane Doe
+jane@example.com · Toronto, ON
+
+EXPERIENCE
+Senior Widget Analyst — Acme Corp (2019–2024)
+• Did the thing that mattered…">{{ .Text }}</textarea>
+
+    {{ if .HasExisting }}
+    <div class="replace">
+      <label style="margin:0;font-weight:400;color:inherit;display:inline">
+        <input type="checkbox" name="replace">
+        ⚠ <b>{{ .Profile }}</b> already has a résumé — replace it entirely (all roles, bullets, skills, and the master document are swapped in one step; per-job tailored copies are untouched).
+      </label>
+    </div>
+    {{ end }}
+
+    {{ if .Error }}<div class="err">✗ {{ .Error }}</div>{{ end }}
+
+    <button type="submit">Import</button>
+    <div class="busy">Parsing with DeepSeek — takes a minute or two, don't close the page…</div>
+    <div class="note">Extraction only: the parser stores your résumé's own wording and never invents or embellishes content. The import writes both the structured bullets (used for per-job tailoring) and the master markdown document.</div>
+  </form>
+</body>
+</html>

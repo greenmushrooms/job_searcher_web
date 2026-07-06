@@ -198,6 +198,14 @@ func main() {
 	r.Get("/settings", seh.Page)
 	r.Post("/settings", seh.Save)
 
+	// Résumé onboarding: paste any résumé, DeepSeek structures it into the
+	// canonical tables + master markdown (extraction only). The DeepSeek
+	// client's own 170s timeout bounds the POST; root routes carry no chi
+	// timeout, matching /settings and /stats.
+	inh := &handlers.IngestHandler{DeepSeek: dsClient, Pool: pool, Renderer: renderer}
+	r.Get("/resume/ingest", inh.Page)
+	r.Post("/resume/ingest", inh.Ingest)
+
 	r.Get("/v1", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v1") })
 	r.Get("/v2", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v2") })
 	r.Get("/v3", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v3") })
