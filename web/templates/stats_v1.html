@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>stats {{ .Variant }} — {{ .Profile }}</title>
+<style>
+  /* page chrome matches jobs.html; chart tokens from the validated palette */
+  :root {
+    --series-1: #2a78d6;   /* evaluated / primary series (blue) */
+    --series-2: #1baf7a;   /* matches (aqua — relief via labels + table view) */
+    --grid: #e1e0d9;       /* hairline gridline */
+    --baseline: #c3c2b7;   /* axis baseline */
+    --ink-2: #52514e;      /* secondary ink */
+    --muted: #898781;      /* axis/label ink */
+  }
+  body { font: 14px/1.45 system-ui, sans-serif; max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem; color: #222; background: #fff; }
+  h1 { font-size: 20px; margin: 0 0 .25rem; }
+  h1 .variant { color: #1a4ed8; text-transform: uppercase; font-size: 14px; }
+  .sub { color: #666; font-size: 12px; margin-bottom: 1rem; }
+  .sub a { color: #1a4ed8; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; }
+  .card { border: 1px solid #e3e3e3; border-radius: 6px; padding: .9rem 1rem 1rem; background: #fff; min-width: 0; }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 { font-size: 11px; color: var(--muted); margin: 0 0 .75rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+
+  /* stat tiles */
+  .tiles { display: flex; gap: .9rem; flex-wrap: wrap; }
+  .tile { flex: 1 1 150px; border: 1px solid #e3e3e3; border-radius: 6px; padding: .7rem .9rem; }
+  .tile .t-label { font-size: 12px; color: var(--ink-2); }
+  .tile .t-value { font-size: 24px; font-weight: 600; margin-top: .1rem; }
+  .tile .t-note { font-size: 11.5px; color: var(--muted); margin-top: .1rem; }
+
+  /* weekly grouped columns */
+  .colchart { display: flex; align-items: stretch; gap: 8px; height: 190px; padding-top: 14px;
+              background: linear-gradient(to top, transparent 0, transparent 1px, transparent 0) }
+  .cc-plot { position: relative; flex: 1; display: flex; align-items: flex-end; gap: 8px;
+             border-bottom: 1px solid var(--baseline);
+             background-image: linear-gradient(to top, var(--grid) 1px, transparent 1px);
+             background-size: 100% 25%; background-position: 0 0; }
+  .cc-ymax { position: absolute; top: -14px; left: 0; font-size: 10.5px; color: var(--muted); }
+  .wk { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; }
+  .wk .bars { display: flex; align-items: flex-end; gap: 2px; width: 100%; max-width: 38px; height: 100%; justify-content: center; }
+  .bar { width: 14px; max-width: 45%; border-radius: 4px 4px 0 0; }
+  .bar.evals { background: var(--series-1); }
+  .bar.matches { background: var(--series-2); }
+  .wk .lbl { position: absolute; top: 100%; margin-top: 3px; font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .wk .direct { position: absolute; bottom: 100%; margin-bottom: 2px; font-size: 10.5px; color: #222; font-weight: 600; white-space: nowrap; }
+  .xaxis-pad { height: 20px; }
+  .legend { display: flex; gap: 1rem; font-size: 12px; color: var(--ink-2); margin-top: 1.3rem; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  /* salary histogram */
+  .hist { display: flex; align-items: flex-end; gap: 2px; height: 150px; padding-top: 14px;
+          border-bottom: 1px solid var(--baseline); position: relative;
+          background-image: linear-gradient(to top, var(--grid) 1px, transparent 1px);
+          background-size: 100% 25%; }
+  .hbin { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; }
+  .hbin .bar { width: 100%; max-width: 24px; background: var(--series-1); border-radius: 4px 4px 0 0; }
+  .hbin .lbl { position: absolute; top: 100%; margin-top: 3px; font-size: 10px; color: var(--muted); white-space: nowrap; }
+  .hbin .direct { position: absolute; bottom: 100%; margin-bottom: 2px; font-size: 10.5px; font-weight: 600; color: #222; }
+  .pctile { position: relative; height: 34px; margin: 26px 4px 0; }
+  .pctile .track { position: absolute; top: 14px; left: 0; right: 0; height: 2px; background: var(--grid); border-radius: 1px; }
+  .pctile .iqr { position: absolute; top: 12px; height: 6px; background: var(--series-1); opacity: .25; border-radius: 3px; }
+  .pctile .mark { position: absolute; top: 8px; width: 2px; height: 14px; background: var(--series-1); }
+  .pctile .mlbl { position: absolute; top: -14px; transform: translateX(-50%); font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
+  .pctile .mval { position: absolute; top: 24px; transform: translateX(-50%); font-size: 10.5px; font-weight: 600; color: #222; white-space: nowrap; }
+
+  /* horizontal bar lists (companies / tokens) */
+  .rowlist { display: flex; flex-direction: column; gap: .45rem; }
+  .rl-row { display: grid; grid-template-columns: minmax(90px, 40%) 1fr auto; gap: .6rem; align-items: center; font-size: 12.5px; }
+  .rl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rl-track { height: 10px; position: relative; }
+  .rl-bar { position: absolute; inset: 0 auto 0 0; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .rl-n { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .rl-n b { color: #222; }
+
+  /* verdict meters */
+  .vd-row { display: grid; grid-template-columns: minmax(90px, 34%) 1fr auto; gap: .6rem; align-items: center; font-size: 12.5px; margin-bottom: .45rem; }
+  .vd-track { height: 10px; background: #f2f1ec; border-radius: 4px; position: relative; overflow: hidden; }
+  .vd-fill { position: absolute; inset: 0 auto 0 0; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; }
+
+  /* application funnel — ordinal blue ramp for stages (deeper = darker), the
+     reserved status palette for outcomes; labels + counts carry the meaning */
+  .fn-1 { background: #86b6ef; } .fn-2 { background: #5598e7; }
+  .fn-3 { background: #2a78d6; } .fn-4 { background: #1c5cab; }
+  .oc-run { background: #2a78d6; } .oc-wait { background: #fab219; }
+  .oc-ghost { background: #898781; } .oc-reject { background: #d03b3b; }
+  .oc-offer { background: #0ca30c; }
+
+  details.tbl { margin-top: .7rem; }
+  details.tbl summary { font-size: 11.5px; color: #1a4ed8; cursor: pointer; user-select: none; }
+  details.tbl table { border-collapse: collapse; font-size: 12px; margin-top: .4rem; }
+  details.tbl th, details.tbl td { padding: .2rem .6rem .2rem 0; text-align: right; font-variant-numeric: tabular-nums; }
+  details.tbl th:first-child, details.tbl td:first-child { text-align: left; }
+  details.tbl th { color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--grid); }
+  .empty { color: #999; font-size: 13px; padding: 1rem 0; }
+
+  /* verdict filter chips — one row, scopes every match-derived section below */
+  .chips { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .9rem; font-size: 12px; }
+  .chip { padding: .22rem .7rem; border: 1px solid #ddd; border-radius: 999px; color: #555; text-decoration: none; background: #fff; }
+  .chip:hover { border-color: #1a4ed8; color: #1a4ed8; }
+  .chip.active { background: #1a4ed8; border-color: #1a4ed8; color: #fff; }
+  .chip .cn { opacity: .75; margin-left: .25rem; }
+</style>
+</head>
+<body>
+  <h1>stats <span class="variant">{{ .Variant }}</span> — {{ .Profile }}</h1>
+  <div class="sub">
+    All-time pipeline history for <b>{{ .Profile }}</b> · match bar = score ≥ {{ .Threshold }} ·
+    <a href="/jobs.html">← jobs</a> ·
+    variant: <a href="/stats/v1">v1 cards</a> / <a href="/stats/v2">v2 report</a>
+  </div>
+
+  <div class="chips">
+    {{ range .Chips }}
+    <a class="chip{{ if .Active }} active{{ end }}" href="{{ .Href }}">{{ .Label }}<span class="cn">{{ .N }}</span></a>
+    {{ end }}
+  </div>
+
+  <div class="tiles" style="margin-bottom:.9rem">
+    {{ range .Tiles }}
+    <div class="tile">
+      <div class="t-label">{{ .Label }}</div>
+      <div class="t-value">{{ .Value }}</div>
+      {{ if .Note }}<div class="t-note">{{ .Note }}</div>{{ end }}
+    </div>
+    {{ end }}
+  </div>
+
+  <div class="grid">
+
+    <div class="card full">
+      <h2>Weekly volume — last 13 weeks</h2>
+      {{ if .HasWeekly }}
+      <div class="colchart">
+        <div class="cc-plot">
+          <span class="cc-ymax">{{ .WeeklyMax }}</span>
+          {{ range .Weekly }}
+          <div class="wk" title="week of {{ .Week }}: {{ .Evals }} evaluated, {{ .Matches }} matched ({{ .Rate }}%)">
+            {{ if .Highlight }}<span class="direct">{{ .Evals }} · {{ .Matches }}</span>{{ end }}
+            <div class="bars">
+              <div class="bar evals" style="height:{{ .EvalPct }}%"></div>
+              <div class="bar matches" style="height:{{ .MatchPct }}%"></div>
+            </div>
+            <span class="lbl">{{ .Week }}</span>
+          </div>
+          {{ end }}
+        </div>
+      </div>
+      <div class="xaxis-pad"></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--series-1)"></span>evaluated</span>
+        <span><span class="swatch" style="background:var(--series-2)"></span>matched ≥ {{ .Threshold }}</span>
+      </div>
+      <details class="tbl">
+        <summary>table view</summary>
+        <table>
+          <tr><th>week of</th><th>evaluated</th><th>matched</th><th>match rate</th></tr>
+          {{ range .Weekly }}<tr><td>{{ .Week }}</td><td>{{ .Evals }}</td><td>{{ .Matches }}</td><td>{{ .Rate }}%</td></tr>{{ end }}
+        </table>
+      </details>
+      {{ else }}<div class="empty">No evaluations in the last 13 weeks.</div>{{ end }}
+    </div>
+
+    <div class="card full">
+      <h2>Salary distribution — matched postings with pay ({{ .Salary.N }} of {{ .Summary.Matches }})</h2>
+      {{ if .HasSalary }}
+      <div class="hist">
+        {{ range .SalaryBins }}
+        <div class="hbin" title="{{ .Label }}: {{ .N }} postings">
+          {{ if .IsModal }}<span class="direct">{{ .N }}</span>{{ end }}
+          <div class="bar" style="height:{{ .Pct }}%"></div>
+          <span class="lbl">{{ .Label }}</span>
+        </div>
+        {{ end }}
+      </div>
+      <div class="xaxis-pad"></div>
+      <div class="pctile">
+        <div class="track"></div>
+        <div class="iqr" style="left:{{ .P25Pos }}%; width:{{ .IQRWidth }}%"></div>
+        <div class="mark" style="left:{{ .P25Pos }}%"><span class="mlbl">p25</span><span class="mval">{{ .SalaryP25 }}</span></div>
+        <div class="mark" style="left:{{ .P50Pos }}%; height:18px; top:6px"><span class="mlbl">median</span><span class="mval">{{ .SalaryP50 }}</span></div>
+        <div class="mark" style="left:{{ .P75Pos }}%"><span class="mlbl">p75</span><span class="mval">{{ .SalaryP75 }}</span></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:.6rem">
+        Yearly-normalized midpoints of the posted ranges (hourly ×2080). Range {{ .SalaryMin }}–{{ .SalaryMax }}; currencies mixed as posted (CAD/USD).
+      </div>
+      {{ else }}<div class="empty">No matched postings carry a parseable salary yet.</div>{{ end }}
+    </div>
+
+    <div class="card">
+      <h2>Repeat-match companies (≥ 2 matches)</h2>
+      {{ if .Companies }}
+      <div class="rowlist">
+        {{ range .Companies }}
+        <div class="rl-row" title="{{ .Name }}: {{ .N }} matches, avg score {{ .AvgScore }}">
+          <span class="rl-name">{{ .Name }}</span>
+          <span class="rl-track"><span class="rl-bar" style="width:{{ .Pct }}%"></span></span>
+          <span class="rl-n"><b>{{ .N }}</b> · avg {{ .AvgScore }}</span>
+        </div>
+        {{ end }}
+      </div>
+      {{ else }}<div class="empty">No company has 2+ matches yet.</div>{{ end }}
+    </div>
+
+    <div class="card">
+      <h2>Verdicts across matches</h2>
+      {{ if .Verdicts }}
+      {{ range .Verdicts }}
+      <div class="vd-row" title="{{ .Name }}: {{ .N }} ({{ .Pct }}%)">
+        <span class="rl-name">{{ .Name }}</span>
+        <span class="vd-track"><span class="vd-fill" style="width:{{ .Pct }}%"></span></span>
+        <span class="rl-n"><b>{{ .N }}</b> · {{ .Pct }}%</span>
+      </div>
+      {{ end }}
+      {{ else }}<div class="empty">No verdict data.</div>{{ end }}
+    </div>
+
+    <div class="card">
+      <h2>Common words in matched titles</h2>
+      {{ if .Tokens }}
+      <div class="rowlist">
+        {{ range .Tokens }}
+        <div class="rl-row" title="{{ .Token }}: {{ .N }} matched titles">
+          <span class="rl-name">{{ .Token }}</span>
+          <span class="rl-track"><span class="rl-bar" style="width:{{ .Pct }}%"></span></span>
+          <span class="rl-n"><b>{{ .N }}</b></span>
+        </div>
+        {{ end }}
+      </div>
+      {{ else }}<div class="empty">No matches yet.</div>{{ end }}
+    </div>
+
+    <div class="card">
+      <h2>Common gaps flagged by the evaluator{{ if .FilterVerdict }} — {{ .FilterVerdict }}{{ end }}</h2>
+      {{ if .Gaps }}
+      <div class="rowlist">
+        {{ range .Gaps }}
+        <div class="rl-row" title="{{ .Token }}: flagged as a gap on {{ .N }} matched jobs">
+          <span class="rl-name">{{ .Token }}</span>
+          <span class="rl-track"><span class="rl-bar" style="width:{{ .Pct }}%"></span></span>
+          <span class="rl-n"><b>{{ .N }}</b></span>
+        </div>
+        {{ end }}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:.5rem">From the evaluator's "key gap" note per job — themes, not a strict ranking; your own stack can appear as contrast.</div>
+      {{ else }}<div class="empty">No gap notes.</div>{{ end }}
+    </div>
+
+    <div class="card">
+      <h2>Application funnel</h2>
+      {{ if .HasFunnel }}
+      <div class="rowlist">
+        {{ range .Funnel }}
+        <div class="rl-row" title="{{ .Label }}: {{ .N }} applications got at least this far ({{ .Share }})">
+          <span class="rl-name">{{ .Label }}</span>
+          <span class="rl-track">{{ if .N }}<span class="rl-bar {{ .Class }}" style="width:{{ .Pct }}%"></span>{{ end }}</span>
+          <span class="rl-n"><b>{{ .N }}</b> · {{ .Share }}</span>
+        </div>
+        {{ end }}
+      </div>
+      <h2 style="margin:1.1rem 0 .75rem">What happened to them</h2>
+      <div class="rowlist">
+        {{ range .Outcomes }}
+        <div class="rl-row" title="{{ .Label }}: {{ .N }} of the applications ({{ .Share }})">
+          <span class="rl-name">{{ .Label }}</span>
+          <span class="rl-track">{{ if .N }}<span class="rl-bar {{ .Class }}" style="width:{{ .Pct }}%"></span>{{ end }}</span>
+          <span class="rl-n"><b>{{ .N }}</b> · {{ .Share }}</span>
+        </div>
+        {{ end }}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:.6rem">
+        Stages are cumulative — an interview also counts in screen. In process = screen/interview underway;
+        awaiting reply = applied &lt; {{ .GhostDays }} days ago; ghosted = {{ .GhostDays }}+ days with no reply.
+      </div>
+      {{ else }}<div class="empty">No applications yet — apply to a job and the funnel appears.</div>{{ end }}
+    </div>
+
+  </div>
+</body>
+</html>
