@@ -4,21 +4,21 @@
 <meta charset="utf-8">
 <title>search settings — {{ .Profile }}</title>
 <style>
-  body { font: 14px/1.5 system-ui, sans-serif; max-width: 640px; margin: 1.5rem auto; padding: 0 1rem; color: #222; background: #fff; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 760px; margin: 1.5rem auto; padding: 0 1rem; color: #222; background: #fff; }
   h1 { font-size: 20px; margin: 0 0 .25rem; }
   .sub { color: #666; font-size: 12px; margin-bottom: 1.2rem; }
   .sub a { color: #1a4ed8; }
-  label { display: block; font-size: 12px; color: #52514e; font-weight: 600; margin: 1rem 0 .25rem; }
-  label .hint { font-weight: 400; color: #898781; }
-  textarea, input[type=number] { box-sizing: border-box; width: 100%; font: inherit; padding: .5rem .6rem; border: 1px solid #ccc; border-radius: 5px; }
-  textarea { min-height: 7.5em; resize: vertical; }
-  input[type=number] { width: 8em; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr 6.5em; gap: .5rem; font-size: 11.5px; color: #52514e; font-weight: 600; margin-bottom: .3rem; }
+  .cols .hint { font-weight: 400; color: #898781; }
+  .row { display: grid; grid-template-columns: 1fr 1fr 6.5em; gap: .5rem; margin-bottom: .45rem; }
+  input { box-sizing: border-box; width: 100%; font: inherit; padding: .45rem .55rem; border: 1px solid #ccc; border-radius: 5px; }
+  input::placeholder { color: #bbb; }
+  input[type=number] { text-align: right; }
   button { margin-top: 1.1rem; padding: .45rem 1.1rem; background: #1a4ed8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-size: 13.5px; }
   button:hover { background: #1340b5; }
   .total { margin-top: 1rem; font-size: 13px; color: #52514e; padding: .6rem .8rem; background: #f7f8fc; border: 1px solid #e3e6f0; border-radius: 6px; }
   .total b { color: #222; }
   .ok { color: #0a7d2e; font-weight: 600; font-size: 13px; margin-top: .8rem; }
-  .warn { color: #b07d00; font-weight: 600; font-size: 13px; margin-top: .4rem; }
   .err { color: #b00020; font-weight: 600; font-size: 13px; margin-top: .8rem; }
   .meta { color: #898781; font-size: 11.5px; margin-top: 1.2rem; }
 </style>
@@ -26,31 +26,34 @@
 <body>
   <h1>search settings — {{ .Profile }}</h1>
   <div class="sub">
-    What the daily scrape looks for on your behalf ·
+    What the daily scrape looks for on your behalf — one line per search ·
     <a href="/jobs.html">← jobs</a> · <a href="/stats">stats</a>
   </div>
 
   <form method="post" action="/settings">
     <input type="hidden" name="profile" value="{{ .Profile }}">
 
-    <label>Search titles <span class="hint">— one per line, e.g. “data engineer”</span></label>
-    <textarea name="titles" spellcheck="false">{{ .Titles }}</textarea>
-
-    <label>Locations <span class="hint">— one per line, e.g. “Toronto, ON” or “United States”</span></label>
-    <textarea name="locations" spellcheck="false">{{ .Locations }}</textarea>
-
-    <label>Results per title × location pair</label>
-    <input type="number" name="searches" min="1" max="{{ .Max }}" value="{{ .Searches }}">
+    <div class="cols">
+      <span>Job title</span>
+      <span>Location</span>
+      <span>Results <span class="hint">(default 20)</span></span>
+    </div>
+    {{ range .Rows }}
+    <div class="row">
+      <input name="title" value="{{ .Title }}" placeholder="e.g. data engineer" spellcheck="false">
+      <input name="location" value="{{ .Location }}" placeholder="e.g. Toronto, ON" spellcheck="false">
+      <input name="searches" type="number" min="1" max="{{ $.Max }}" value="{{ .Searches }}" placeholder="20">
+    </div>
+    {{ end }}
 
     <div class="total">
-      Each daily run requests <b>titles × locations × results</b> jobs
-      {{ if .Total }}— currently <b>{{ .Total }}</b>{{ end }} (cap <b>{{ .Max }}</b>;
-      results are lowered automatically to fit).
+      Each line is one scrape: that title, in that location, up to that many results.
+      {{ if .Total }}Current total per day: <b>{{ .Total }}</b> of <b>{{ .Max }}</b> max.{{ else }}Daily cap: <b>{{ .Max }}</b> results across all lines.{{ end }}
+      Blank lines are ignored — clear a line to remove it (up to {{ .MaxRows }} lines; save to get more blanks).
     </div>
 
     {{ if .Error }}<div class="err">✗ {{ .Error }}</div>{{ end }}
     {{ if .Saved }}<div class="ok">✓ Saved. Takes effect with the next daily scrape (settings sync each morning, scrape runs at 18:00).</div>{{ end }}
-    {{ if .Clamped }}<div class="warn">⚠ Results per search were lowered to keep the total under {{ .Max }}.</div>{{ end }}
 
     <button type="submit">Save</button>
   </form>
