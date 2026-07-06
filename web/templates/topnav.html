@@ -1,0 +1,20 @@
+{{- /* Shared top navigation for every full page. Context = active page id:
+       "jobs" | "stats" | "settings" | "ingest". Carries its own styles so
+       pages don't duplicate them. jobs.html is a static file, not a template —
+       it embeds a hand-copy of this markup; keep the two in step. */ -}}
+<style>
+  .topnav { display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; margin: 0 0 1.1rem; padding-bottom: .65rem; border-bottom: 1px solid #e3e3e3; font-size: 13px; }
+  .topnav .tn-brand { font-weight: 700; color: #222; text-decoration: none; margin-right: .8rem; font-size: 14px; }
+  .topnav .tn-brand:hover { color: #1a4ed8; }
+  .topnav a:not(.tn-brand) { color: #555; text-decoration: none; padding: .25rem .75rem; border-radius: 999px; border: 1px solid transparent; }
+  .topnav a:not(.tn-brand):hover { color: #1a4ed8; border-color: #c9d4f0; }
+  .topnav a.active { background: #1a4ed8; color: #fff; font-weight: 600; }
+  .topnav a.active:hover { color: #fff; border-color: transparent; }
+</style>
+<nav class="topnav">
+  <a class="tn-brand" href="/">🔍 job searcher</a>
+  <a href="/jobs.html"{{ if eq . "jobs" }} class="active"{{ end }}>Jobs</a>
+  <a href="/stats"{{ if eq . "stats" }} class="active"{{ end }}>Stats</a>
+  <a href="/settings"{{ if eq . "settings" }} class="active"{{ end }}>Search settings</a>
+  <a href="/resume/ingest"{{ if eq . "ingest" }} class="active"{{ end }}>Import résumé</a>
+</nav>

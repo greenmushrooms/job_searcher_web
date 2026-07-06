@@ -104,10 +104,10 @@
 </style>
 </head>
 <body>
+  {{ template "topnav" "stats" }}
   <h1>job-search report <span class="variant">{{ .Variant }}</span></h1>
   <div class="sub">
     <b>{{ .Profile }}</b> · all-time · match bar = score ≥ {{ .Threshold }} ·
-    <a href="/jobs.html">← jobs</a> ·
     variant: <a href="/stats/v1">v1 cards</a> / <a href="/stats/v2">v2 report</a>
   </div>
 
