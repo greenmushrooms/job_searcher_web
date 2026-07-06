@@ -95,6 +95,7 @@
 </style>
 </head>
 <body data-variant="{{ .Variant }}" data-job="{{ .JobID }}" data-profile="{{ .Profile }}">
+  {{ template "topnav" "difflab" }}
   <h1>Résumé diff lab — <span class="variant">{{ .Variant }}</span></h1>
   <div class="sub">
     Left = your <b>master résumé</b> (edit &amp; <b>save permanently</b>). Right = the version tailored for
