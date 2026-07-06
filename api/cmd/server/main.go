@@ -23,6 +23,8 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resume"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/resumemaster"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/searchconfig"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/stats"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/templates"
 )
 
@@ -79,6 +81,9 @@ func main() {
 	if dsErr != nil {
 		log.Printf("deepseek: %v (resume tailoring endpoints will return 503)", dsErr)
 	}
+
+	statsRepo := stats.New(pool)
+	searchCfgRepo := searchconfig.New(pool)
 
 	jh := &handlers.JobsHandler{Repo: jobsRepo}
 	ah := &handlers.ApplicationsHandler{Repo: appsRepo}
@@ -179,6 +184,20 @@ func main() {
 	// Diff-lab comparison pages — highlighting variants of the two-pane
 	// master-vs-job résumé editor, to pick one. v4 is the zero-JS, server-
 	// rendered diff (no CodeMirror): it recomputes via POST /ui/difflab/diff.
+	// Per-profile stats page — two visual variants (diff-lab style) until one
+	// is picked. /stats is the v1 default.
+	sh := &handlers.StatsHandler{Stats: statsRepo, Renderer: renderer}
+	r.Get("/stats", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v1") })
+	r.Get("/stats/v1", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v1") })
+	r.Get("/stats/v2", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v2") })
+
+	// Per-profile search-criteria editor. Edits land in web.job_search_config;
+	// the morning box-db-sync pull propagates them to the pipeline's
+	// adm.job_search_config for the next 18:00 scrape.
+	seh := &handlers.SettingsHandler{Config: searchCfgRepo, Renderer: renderer}
+	r.Get("/settings", seh.Page)
+	r.Post("/settings", seh.Save)
+
 	r.Get("/v1", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v1") })
 	r.Get("/v2", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v2") })
 	r.Get("/v3", func(w http.ResponseWriter, req *http.Request) { rh.DiffLab(w, req, "v3") })
