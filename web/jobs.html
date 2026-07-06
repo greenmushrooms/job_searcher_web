@@ -169,8 +169,26 @@
 </style>
 </head>
 <body>
+  <!-- Shared top nav — hand-copy of web/templates/topnav.html (this page is
+       static, not a Go template); keep the two in step. -->
+  <style>
+    .topnav { display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; margin: 0 0 1.1rem; padding-bottom: .65rem; border-bottom: 1px solid #e3e3e3; font-size: 13px; }
+    .topnav .tn-brand { font-weight: 700; color: #222; text-decoration: none; margin-right: .8rem; font-size: 14px; }
+    .topnav .tn-brand:hover { color: #1a4ed8; }
+    .topnav a:not(.tn-brand) { color: #555; text-decoration: none; padding: .25rem .75rem; border-radius: 999px; border: 1px solid transparent; }
+    .topnav a:not(.tn-brand):hover { color: #1a4ed8; border-color: #c9d4f0; }
+    .topnav a.active { background: #1a4ed8; color: #fff; font-weight: 600; }
+    .topnav a.active:hover { color: #fff; border-color: transparent; }
+  </style>
+  <nav class="topnav">
+    <a class="tn-brand" href="/">🔍 job searcher</a>
+    <a href="/jobs.html" class="active">Jobs</a>
+    <a href="/stats">Stats</a>
+    <a href="/settings">Search settings</a>
+    <a href="/resume/ingest">Import résumé</a>
+  </nav>
   <h1>jobs</h1>
-  <div class="sub"><b>Unread</b> = no apply/skip decision yet · 📄 = résumé saved. Filters reload the list; default range is the last 2 weeks. <b>Search</b> finds any job by title/company/location across all scores &amp; dates. · <a href="/stats" style="color:#1a4ed8">📊 stats</a> · <a href="/settings" style="color:#1a4ed8">⚙️ search settings</a> · <a href="/resume/ingest" style="color:#1a4ed8">📥 import résumé</a></div>
+  <div class="sub"><b>Unread</b> = no apply/skip decision yet · 📄 = résumé saved. Filters reload the list; default range is the last 2 weeks. <b>Search</b> finds any job by title/company/location across all scores &amp; dates.</div>
 
   <div id="error-banner" role="alert">
     <span class="eb-msg"></span>

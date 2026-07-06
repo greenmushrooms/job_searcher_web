@@ -24,11 +24,9 @@
 </style>
 </head>
 <body>
+  {{ template "topnav" "ingest" }}
   <h1>import résumé — {{ .Profile }}</h1>
-  <div class="sub">
-    Paste a résumé in any form (text from Word, a PDF, or markdown) ·
-    <a href="/jobs.html">← jobs</a> · <a href="/settings">search settings</a>
-  </div>
+  <div class="sub">Paste a résumé in any form — text copied from Word, a PDF, or markdown.</div>
 
   {{ if .Done }}
   <div class="ok">

@@ -24,11 +24,9 @@
 </style>
 </head>
 <body>
+  {{ template "topnav" "settings" }}
   <h1>search settings — {{ .Profile }}</h1>
-  <div class="sub">
-    What the daily scrape looks for on your behalf — one line per search ·
-    <a href="/jobs.html">← jobs</a> · <a href="/stats">stats</a>
-  </div>
+  <div class="sub">What the daily scrape looks for on your behalf — one line per search.</div>
 
   <form method="post" action="/settings">
     <input type="hidden" name="profile" value="{{ .Profile }}">
