@@ -14,8 +14,9 @@ import (
 )
 
 // spareRows is how many blank entry rows the form renders below the saved
-// ones — the zero-JS way to "add" searches; save and revisit for more.
-const spareRows = 3
+// ones. The page's add/remove buttons handle row management; one server-side
+// spare keeps an empty profile (and noscript) editable.
+const spareRows = 1
 
 // SettingsHandler serves the per-profile search editor. Each entry is one
 // scrape — title + location + how many results to request — stored as rows in

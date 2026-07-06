@@ -211,11 +211,18 @@
   </section>
 
   <section>
-    <h2>Common words in matched titles</h2>
-    {{ if .Tokens }}
-    <div class="tags">
-      {{ range .Tokens }}<span class="tag">{{ .Token }} <b>{{ .N }}</b></span>{{ end }}
-    </div>
+    <h2>Top matched job titles</h2>
+    {{ if .TitleRows }}
+    <table>
+      <tr><th>title</th><th>matches</th><th>avg score</th></tr>
+      {{ range .TitleRows }}
+      <tr>
+        <td class="co" title="{{ .Name }}">{{ .Name }}<span class="inbar" style="width:{{ .Pct }}px"></span></td>
+        <td>{{ .N }}</td>
+        <td>{{ .AvgScore }}</td>
+      </tr>
+      {{ end }}
+    </table>
     {{ else }}<div class="empty">No matches yet.</div>{{ end }}
   </section>
 

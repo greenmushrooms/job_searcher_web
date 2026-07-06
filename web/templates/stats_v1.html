@@ -219,14 +219,14 @@
     </div>
 
     <div class="card">
-      <h2>Common words in matched titles</h2>
-      {{ if .Tokens }}
+      <h2>Top matched job titles</h2>
+      {{ if .TitleRows }}
       <div class="rowlist">
-        {{ range .Tokens }}
-        <div class="rl-row" title="{{ .Token }}: {{ .N }} matched titles">
-          <span class="rl-name">{{ .Token }}</span>
+        {{ range .TitleRows }}
+        <div class="rl-row" title="{{ .Name }}: {{ .N }} matches, avg score {{ .AvgScore }}">
+          <span class="rl-name">{{ .Name }}</span>
           <span class="rl-track"><span class="rl-bar" style="width:{{ .Pct }}%"></span></span>
-          <span class="rl-n"><b>{{ .N }}</b></span>
+          <span class="rl-n"><b>{{ .N }}</b> · avg {{ .AvgScore }}</span>
         </div>
         {{ end }}
       </div>

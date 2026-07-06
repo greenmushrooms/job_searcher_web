@@ -108,8 +108,8 @@ type Overview struct {
 	Weekly    []WeekRow
 	Salaries  Salaries
 	Companies []Company
-	Verdicts  []Verdict // always unfiltered — feeds the filter chips
-	Titles    []TitleToken
+	Verdicts  []Verdict    // always unfiltered — feeds the filter chips
+	TopTitles []Company    // top matched job titles (grouped, not tokenized)
 	Gaps      []TitleToken // frequent words in the evaluator's key_gap notes
 }
 
@@ -339,25 +339,19 @@ func (r *Repo) verdicts(ctx context.Context, o *Overview) error {
 	return rows.Err()
 }
 
+// titles ranks the exact job titles among matches (case/space-normalized, one
+// row per distinct title — not word tokens), same shape as the companies list:
+// "which titles match me most, and how well".
 func (r *Repo) titles(ctx context.Context, o *Overview) error {
 	rows, err := r.q.Query(ctx, `
-        WITH tokens AS (
-          SELECT regexp_split_to_table(lower(j.title), '[^a-z0-9+#]+') AS tok
-          FROM (
-            SELECT DISTINCT ON (e.job_id) e.job_id
-            FROM evaluated_jobs e
-            WHERE e.sys_profile = $1 AND e.avg_score >= $2`+verdictClause+`
-            ORDER BY e.job_id, e.avg_score DESC
-          ) b
-          JOIN jobspy_jobs j ON j.id = b.job_id AND j.sys_profile = $1
-        )
-        SELECT tok, count(*) AS n
-        FROM tokens
-        WHERE length(tok) >= 3
-          AND tok NOT IN ('the','and','for','with','our','you','are','your',
-                          'will','from','this','that','have','has','job','role',
-                          'team','new','remote','all','any','one','two','iii')
-        GROUP BY 1 ORDER BY n DESC
+        SELECT min(j.title), count(DISTINCT e.job_id) AS n,
+               round(avg(e.avg_score)::numeric, 1)
+        FROM evaluated_jobs e
+        JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
+        WHERE e.sys_profile = $1 AND e.avg_score >= $2`+verdictClause+`
+          AND COALESCE(j.title, '') <> ''
+        GROUP BY lower(btrim(j.title))
+        ORDER BY n DESC, 3 DESC
         LIMIT 12`,
 		o.Profile, o.Threshold, o.Verdict)
 	if err != nil {
@@ -365,11 +359,11 @@ func (r *Repo) titles(ctx context.Context, o *Overview) error {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var t TitleToken
-		if err := rows.Scan(&t.Token, &t.N); err != nil {
+		var t Company
+		if err := rows.Scan(&t.Name, &t.N, &t.AvgScore); err != nil {
 			return err
 		}
-		o.Titles = append(o.Titles, t)
+		o.TopTitles = append(o.TopTitles, t)
 	}
 	return rows.Err()
 }
