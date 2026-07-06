@@ -121,7 +121,7 @@ type statsView struct {
 
 	Companies []statsCompanyRow
 	Verdicts  []statsVerdictRow
-	Tokens    []statsTokenRow
+	TitleRows []statsCompanyRow // top matched job titles, companies-style
 	Gaps      []statsTokenRow
 
 	// Verdict filter state: "" = all matches.
@@ -268,13 +268,16 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 	}
 
 	maxT := 0
-	for _, t := range o.Titles {
+	for _, t := range o.TopTitles {
 		if t.N > maxT {
 			maxT = t.N
 		}
 	}
-	for _, t := range o.Titles {
-		v.Tokens = append(v.Tokens, statsTokenRow{Token: t.Token, N: t.N, Pct: pctOf(t.N, maxT)})
+	for _, t := range o.TopTitles {
+		v.TitleRows = append(v.TitleRows, statsCompanyRow{
+			Name: t.Name, N: t.N, Pct: pctOf(t.N, maxT),
+			AvgScore: fmt.Sprintf("%.1f", t.AvgScore),
+		})
 	}
 
 	maxG := 0
