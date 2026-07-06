@@ -4,8 +4,8 @@
 -- sum(searches), capped at 300 by the app on save (and re-guarded by the
 -- box-db-sync pull into adm.job_searches).
 --
--- The old web.job_search_config stays in place (unreferenced) until the whole
--- chain has been on rows for a while; drop it in a later migration.
+-- web.job_search_config is dropped by migration 017 once this ships; the seed
+-- below guards on its existence so this file stays safe to re-run after that.
 --
 -- Idempotent: the seed only fires for profiles with no rows here yet, expanding
 -- the old cross product so the scrape set is preserved exactly.
@@ -19,11 +19,17 @@ CREATE TABLE IF NOT EXISTS web.job_searches (
     PRIMARY KEY (sys_profile, sort_order)
 );
 
-INSERT INTO web.job_searches (sys_profile, sort_order, title, location, searches)
-SELECT c.sys_profile,
-       row_number() OVER (PARTITION BY c.sys_profile ORDER BY t.ord, l.ord) - 1,
-       t.title, l.location, c.searches
-FROM web.job_search_config c
-CROSS JOIN LATERAL unnest(c.titles)    WITH ORDINALITY AS t(title, ord)
-CROSS JOIN LATERAL unnest(c.locations) WITH ORDINALITY AS l(location, ord)
-WHERE NOT EXISTS (SELECT 1 FROM web.job_searches s WHERE s.sys_profile = c.sys_profile);
+DO $$
+BEGIN
+    IF to_regclass('web.job_search_config') IS NULL THEN
+        RETURN; -- source already dropped by 017; nothing to seed from
+    END IF;
+    INSERT INTO web.job_searches (sys_profile, sort_order, title, location, searches)
+    SELECT c.sys_profile,
+           row_number() OVER (PARTITION BY c.sys_profile ORDER BY t.ord, l.ord) - 1,
+           t.title, l.location, c.searches
+    FROM web.job_search_config c
+    CROSS JOIN LATERAL unnest(c.titles)    WITH ORDINALITY AS t(title, ord)
+    CROSS JOIN LATERAL unnest(c.locations) WITH ORDINALITY AS l(location, ord)
+    WHERE NOT EXISTS (SELECT 1 FROM web.job_searches s WHERE s.sys_profile = c.sys_profile);
+END $$;

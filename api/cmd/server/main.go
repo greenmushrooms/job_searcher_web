@@ -175,8 +175,7 @@ func main() {
 		})
 	})
 
-	// Land on the current résumé workspace (jobs.html) rather than the older
-	// index.html prototype.
+	// Land on the résumé workspace.
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		http.Redirect(w, req, "/jobs.html", http.StatusFound)
 	})
@@ -191,9 +190,9 @@ func main() {
 	r.Get("/stats/v1", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v1") })
 	r.Get("/stats/v2", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v2") })
 
-	// Per-profile search-criteria editor. Edits land in web.job_search_config;
-	// the morning box-db-sync pull propagates them to the pipeline's
-	// adm.job_search_config for the next 18:00 scrape.
+	// Per-profile search-criteria editor. Edits land in web.job_searches (one
+	// row per title+location+results); the morning box-db-sync pull propagates
+	// them to the pipeline's adm.job_searches for the next 18:00 scrape.
 	seh := &handlers.SettingsHandler{Config: searchCfgRepo, Pool: pool, Renderer: renderer}
 	r.Get("/settings", seh.Page)
 	r.Post("/settings", seh.Save)

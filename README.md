@@ -2,7 +2,9 @@
 
 User-facing layer on top of the `job_searcher_2` data pipeline.
 
-The pipeline (separate project) scrapes and scores jobs, writing to `public.jobspy_jobs` and `public.evaluated_jobs`. This project owns everything user-facing on top of that data: an HTTP API plus an htmx UI for triaging good jobs, recording application status, and (later) generating tailored resumes via DeepSeek.
+The pipeline (separate project) scrapes and scores jobs, writing to `public.jobspy_jobs` and `public.evaluated_jobs`. This project owns everything user-facing on top of that data: an HTTP API plus an htmx UI for triaging good jobs, recording application status, tailoring per-job résumés and cover letters via DeepSeek, and editing what the pipeline scrapes.
+
+Pages: `/jobs.html` (triage + résumé workspace) · `/stats` (pipeline history + application funnel) · `/settings` (per-profile search entries) · `/resume/ingest` (paste-a-résumé onboarding).
 
 ```
 [data_eng pipeline] --writes--> [Postgres: public.*]
@@ -11,14 +13,14 @@ The pipeline (separate project) scrapes and scores jobs, writing to `public.jobs
                                        |
 [htmx UI] <--->  [Go API]  <-----------+
                     |
-                    +--writes--> [Postgres: web.*]  (applications, resume_edits, ...)
+                    +--writes--> [Postgres: web.*]  (job review, resumes, search entries, ...)
                     |
-                    +--calls---> [DeepSeek API]     (resume tailoring, later)
+                    +--calls---> [DeepSeek API]     (resume tailoring, résumé ingest)
 ```
 
 Boundaries:
 - The pipeline's `public.*` tables are read-only from this project.
-- This project's writes go to the `web.*` schema only.
+- This project's writes go to the `web.*` schema only. (`web.job_searches` reaches the pipeline's `adm.job_searches` via the box-db-sync morning flow, not from this code.)
 - The pipeline does not import or call this project.
 
 ## Layout
@@ -65,6 +67,9 @@ cd api && go run ./cmd/seed-resume          # profile=Slava, file from RESUME_JS
 - `006_jobs_resume.sql` — renames `web.resume_finalizations` → `web.jobs_resume` (the per-job tailored resume), adds a `removals` snapshot + `generated_at`, and widens the `application_events` event-type CHECK to allow `resume_generated`.
 - `007_job_review.sql` — renames `web.applications` → `web.job_review` (per-job review state: applied/skipped/interview). "Unread" in the UI = no row here yet.
 - `011_cover_letter.sql` — adds `web.jobs_cover_letter` (per-job AI-drafted, hand-edited cover letter) and widens the event-type CHECK to allow `cover_letter_drafted` / `cover_letter_saved`.
+- `012_resume_master.sql` — `web.resume_master`: the free-form master résumé markdown, one per profile (the "original" the editors diff against).
+- `013_jobs_resume_scd2.sql` — versions `web.jobs_resume` as SCD Type 2 (saves keep history; any version can be restored).
+- `015`/`016`/`017` — search-criteria editing: 015's cross-product config table was replaced the same day by per-entry `web.job_searches` (one row per title + location + result count, ≤ 300 results/day per profile) and dropped in 017. Rows sync to the pipeline's `adm.job_searches` each morning via box-db-sync.
 
 Apply any later migration with the generic runner (no `psql` needed):
 
