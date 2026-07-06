@@ -194,7 +194,7 @@ func main() {
 	// Per-profile search-criteria editor. Edits land in web.job_search_config;
 	// the morning box-db-sync pull propagates them to the pipeline's
 	// adm.job_search_config for the next 18:00 scrape.
-	seh := &handlers.SettingsHandler{Config: searchCfgRepo, Renderer: renderer}
+	seh := &handlers.SettingsHandler{Config: searchCfgRepo, Pool: pool, Renderer: renderer}
 	r.Get("/settings", seh.Page)
 	r.Post("/settings", seh.Save)
 
