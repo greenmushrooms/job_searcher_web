@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>stats {{ .Variant }} — {{ .Profile }}</title>
+<title>stats — {{ .Profile }}</title>
 <style>
   /* page chrome matches jobs.html; chart tokens from the validated palette */
   :root {
@@ -15,7 +15,6 @@
   }
   body { font: 14px/1.45 system-ui, sans-serif; max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem; color: #222; background: #fff; }
   h1 { font-size: 20px; margin: 0 0 .25rem; }
-  h1 .variant { color: #1a4ed8; text-transform: uppercase; font-size: 14px; }
   .sub { color: #666; font-size: 12px; margin-bottom: 1rem; }
   .sub a { color: #1a4ed8; }
 
@@ -112,10 +111,9 @@
 </head>
 <body>
   {{ template "topnav" "stats" }}
-  <h1>stats <span class="variant">{{ .Variant }}</span> — {{ .Profile }}</h1>
+  <h1>stats — {{ .Profile }}</h1>
   <div class="sub">
-    All-time pipeline history for <b>{{ .Profile }}</b> · match bar = score ≥ {{ .Threshold }} ·
-    variant: <a href="/stats/v1">v1 cards</a> / <a href="/stats/v2">v2 report</a>
+    All-time pipeline history for <b>{{ .Profile }}</b> · match bar = score ≥ {{ .Threshold }}
   </div>
 
   <div class="chips">

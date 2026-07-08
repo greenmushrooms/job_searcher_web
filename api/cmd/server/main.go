@@ -193,9 +193,17 @@ func main() {
 	// Per-profile stats page — two visual variants (diff-lab style) until one
 	// is picked. /stats is the v1 default.
 	sh := &handlers.StatsHandler{Stats: statsRepo, Renderer: renderer}
-	r.Get("/stats", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v1") })
-	r.Get("/stats/v1", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v1") })
-	r.Get("/stats/v2", func(w http.ResponseWriter, req *http.Request) { sh.Page(w, req, "v2") })
+	r.Get("/stats", sh.Page)
+	// The v1/v2 comparison ended with v1 promoted; old variant URLs go home.
+	statsHome := func(w http.ResponseWriter, req *http.Request) {
+		target := "/stats"
+		if q := req.URL.RawQuery; q != "" {
+			target += "?" + q
+		}
+		http.Redirect(w, req, target, http.StatusMovedPermanently)
+	}
+	r.Get("/stats/v1", statsHome)
+	r.Get("/stats/v2", statsHome)
 
 	// Per-profile search-criteria editor. Edits land in web.job_searches (one
 	// row per title+location+results); the morning box-db-sync pull propagates

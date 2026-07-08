@@ -13,8 +13,7 @@ import (
 )
 
 // StatsHandler serves the per-profile stats page (zero-JS, server-rendered
-// CSS charts). Two visual variants are mounted at /stats/v1 and /stats/v2 —
-// diff-lab style — until one is picked.
+// CSS charts).
 type StatsHandler struct {
 	Stats    *stats.Repo
 	Renderer *render.Renderer
@@ -101,17 +100,13 @@ type statsChip struct {
 
 type statsView struct {
 	Profile   string
-	Variant   string
 	Threshold string
 
 	Tiles []statsTile
 
-	Weekly      []statsBarPair
-	WeeklyMax   int // y-axis top (max evals in a week)
-	HasWeekly   bool
-	MatchTotal  string // hero figure for v2
-	EvalTotal   string // formatted, for the v2 hero sentence
-	ScrapeTotal string
+	Weekly    []statsBarPair
+	WeeklyMax int // y-axis top (max evals in a week)
+	HasWeekly bool
 
 	SalaryBins []statsSalaryBin
 	Salary     stats.Salaries
@@ -143,10 +138,10 @@ type statsView struct {
 	Summary stats.Summary
 }
 
-// Page handles GET /stats and /stats/v{1,2} — the full stats page.
-// ?title=Data+Engineer narrows every match-derived section (salary, weekly
-// matches, companies, verdicts, gaps) to that job title.
-func (h *StatsHandler) Page(w http.ResponseWriter, r *http.Request, variant string) {
+// Page handles GET /stats — the full stats page. ?title=data+engineer narrows
+// every match-derived section (salary, weekly matches, companies, verdicts,
+// gaps) to that title family.
+func (h *StatsHandler) Page(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	profile := profiles.Resolve(r.Context(), q.Get("profile"))
 	o, err := h.Stats.Overview(r.Context(), profile, q.Get("title"))
@@ -154,13 +149,12 @@ func (h *StatsHandler) Page(w http.ResponseWriter, r *http.Request, variant stri
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.Renderer.HTML(w, http.StatusOK, "stats_"+variant, buildStatsView(o, variant, q.Get("profile")))
+	h.Renderer.HTML(w, http.StatusOK, "stats", buildStatsView(o, q.Get("profile")))
 }
 
-func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
+func buildStatsView(o *stats.Overview, profileParam string) statsView {
 	v := statsView{
 		Profile:     o.Profile,
-		Variant:     variant,
 		Threshold:   trimFloat(o.Threshold),
 		Summary:     o.Summary,
 		FilterTitle: o.TitleFilter,
@@ -179,7 +173,7 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 		if enc := vals.Encode(); enc != "" {
 			return "?" + enc
 		}
-		return "/stats/" + variant
+		return "/stats"
 	}
 	activeTitle := func(key string) bool { return strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(o.TitleFilter)) }
 	allN := 0
@@ -203,9 +197,6 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 	if o.Summary.Evaluated > 0 {
 		matchRate = 100 * float64(o.Summary.Matches) / float64(o.Summary.Evaluated)
 	}
-	v.MatchTotal = groupInt(o.Summary.Matches)
-	v.EvalTotal = groupInt(o.Summary.Evaluated)
-	v.ScrapeTotal = groupInt(o.Summary.Scraped)
 	matchLabel := "Matches ≥ " + v.Threshold
 	if v.FilterTitle != "" {
 		matchLabel += " · " + v.FilterTitle
