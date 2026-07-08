@@ -68,6 +68,15 @@
   .pctile .mark { position: absolute; top: 8px; width: 2px; height: 14px; background: var(--series-1); }
   .pctile .mlbl { position: absolute; top: -14px; transform: translateX(-50%); font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
   .pctile .mval { position: absolute; top: 24px; transform: translateX(-50%); font-size: 10.5px; font-weight: 600; color: #222; white-space: nowrap; }
+  /* second line: tier medians on the same x-span */
+  .tierline { position: relative; height: 32px; margin: 10px 4px 0; }
+  .tierline .track { position: absolute; top: 6px; left: 0; right: 0; height: 2px; background: var(--grid); border-radius: 1px; }
+  .tierline .mark { position: absolute; top: 0; width: 2px; height: 14px; }
+  .tierline .mark.sr { background: #1c5cab; }
+  .tierline .mark.rest { background: #86b6ef; }
+  .tierline .mval { position: absolute; top: 16px; transform: translateX(-50%); font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+  .tierline .mark.sr .mval { color: #1c5cab; }
+  .tierline .mark.rest .mval { color: #4a7dbd; }
 
   /* horizontal bar lists (companies / tokens) */
   .rowlist { display: flex; flex-direction: column; gap: .45rem; }
@@ -192,6 +201,11 @@
         <div class="mark" style="left:{{ .P25Pos }}%"><span class="mlbl">p25</span><span class="mval">{{ .SalaryP25 }}</span></div>
         <div class="mark" style="left:{{ .P50Pos }}%; height:18px; top:6px"><span class="mlbl">median</span><span class="mval">{{ .SalaryP50 }}</span></div>
         <div class="mark" style="left:{{ .P75Pos }}%"><span class="mlbl">p75</span><span class="mval">{{ .SalaryP75 }}</span></div>
+      </div>
+      <div class="tierline" title="median by seniority tier, same scale">
+        <div class="track"></div>
+        {{ if .SalarySrMedian }}<div class="mark sr" style="left:{{ .SrMedPos }}%"><span class="mval">{{ .SalarySrMedian }} sr</span></div>{{ end }}
+        {{ if .SalaryRestMedian }}<div class="mark rest" style="left:{{ .RestMedPos }}%"><span class="mval">{{ .SalaryRestMedian }} other</span></div>{{ end }}
       </div>
       <div style="font-size:11px;color:var(--muted);margin-top:.6rem">
         <span style="display:inline-block;width:9px;height:9px;background:#1c5cab;border-radius:2px;vertical-align:-1px"></span> senior-tier{{ if .SalarySrMedian }} — median <b>{{ .SalarySrMedian }}</b> ({{ .Salary.SrN }}){{ end }} ·

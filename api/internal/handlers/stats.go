@@ -123,7 +123,9 @@ type statsView struct {
 	// Percentile marker positions across the histogram x-range, in %.
 	P25Pos, P50Pos, P75Pos int
 	IQRWidth               int // P75Pos - P25Pos, for the band fill
-	HasSalary              bool
+	// Tier-median marker positions on the same span (second track line).
+	SrMedPos, RestMedPos int
+	HasSalary            bool
 
 	Companies []statsCompanyRow
 	Verdicts  []statsVerdictRow
@@ -406,6 +408,12 @@ func buildSalaryBins(v *statsView, s stats.Salaries) {
 		v.P75Pos = pctOf(s.P75-lo, span)
 		if v.IQRWidth = v.P75Pos - v.P25Pos; v.IQRWidth < 1 {
 			v.IQRWidth = 1
+		}
+		if s.SrN > 0 {
+			v.SrMedPos = pctOf(s.SrMedian-lo, span)
+		}
+		if s.RestN > 0 {
+			v.RestMedPos = pctOf(s.RestMedian-lo, span)
 		}
 	}
 }
