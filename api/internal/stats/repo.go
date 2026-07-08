@@ -43,11 +43,14 @@ type WeekRow struct {
 
 // Company is a repeat matcher: a company with >= 2 distinct matched jobs.
 // Title buckets reuse the shape; for those, Key is the normalized family key
-// the filter matches on ("data engineer") while Name is the display form.
+// the filter matches on ("data engineer"), Name is the display form, and
+// Senior counts the bucket's postings whose original title carried a
+// senior-tier marker (senior / sr / staff / principal / lead).
 type Company struct {
 	Key      string
 	Name     string
 	N        int
+	Senior   int
 	AvgScore float64
 }
 
@@ -104,7 +107,7 @@ type Funnel struct {
 // "data engineer". Needs jobspy_jobs alias j in scope.
 const normTitleExpr = `btrim(regexp_replace(regexp_replace(regexp_replace(` +
 	`lower(regexp_replace(j.title, '([a-z])New$', '\1')),` +
-	` '[^a-z0-9]+', ' ', 'g'),` +
+	` '[^[:alnum:]]+', ' ', 'g'),` +
 	` '\m(senior|sr|junior|jr|lead|staff|principal|intermediate|associate|ii|iii|iv|[0-9]+)\M', ' ', 'g'),` +
 	` '\s+', ' ', 'g'))`
 
@@ -365,10 +368,12 @@ func (r *Repo) verdicts(ctx context.Context, o *Overview) error {
 // "which roles match me most, and how well".
 func (r *Repo) titles(ctx context.Context, o *Overview) error {
 	rows, err := r.q.Query(ctx, `
-        SELECT k, initcap(k), n, avg
+        SELECT k, initcap(k), n, sr, avg
         FROM (
           SELECT `+normTitleExpr+` AS k,
                  count(DISTINCT e.job_id) AS n,
+                 count(DISTINCT e.job_id) FILTER (
+                   WHERE lower(j.title) ~ '\m(senior|sr|staff|principal|lead)\M') AS sr,
                  round(avg(e.avg_score)::numeric, 1) AS avg
           FROM evaluated_jobs e
           JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
@@ -386,7 +391,7 @@ func (r *Repo) titles(ctx context.Context, o *Overview) error {
 	defer rows.Close()
 	for rows.Next() {
 		var t Company
-		if err := rows.Scan(&t.Key, &t.Name, &t.N, &t.AvgScore); err != nil {
+		if err := rows.Scan(&t.Key, &t.Name, &t.N, &t.Senior, &t.AvgScore); err != nil {
 			return err
 		}
 		o.TopTitles = append(o.TopTitles, t)
