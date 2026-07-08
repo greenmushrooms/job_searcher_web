@@ -42,7 +42,10 @@ type WeekRow struct {
 }
 
 // Company is a repeat matcher: a company with >= 2 distinct matched jobs.
+// Title buckets reuse the shape; for those, Key is the normalized family key
+// the filter matches on ("data engineer") while Name is the display form.
 type Company struct {
+	Key      string
 	Name     string
 	N        int
 	AvgScore float64
@@ -93,10 +96,21 @@ type Funnel struct {
 	Ghosted   int // still 'applied', no outcome, GhostAfterDays+ old
 }
 
-// titleClause narrows "matches" to one job title when $3 is set ("" = all).
-// Compared case/space-insensitively against jobspy_jobs alias j, which every
-// filtered query joins.
-const titleClause = ` AND ($3 = '' OR lower(btrim(j.title)) = lower(btrim($3)))`
+// normTitleExpr buckets a posting title into its role family so seniority
+// variants aggregate instead of splintering: strip Indeed's fused "…New"
+// badge, lowercase, punctuation → spaces, drop seniority/level tokens
+// (senior, sr, lead, staff, II, numerals, …), collapse whitespace. "Lead Data
+// Engineer", "Sr. Data Engineer II" and "Data Engineer" all key to
+// "data engineer". Needs jobspy_jobs alias j in scope.
+const normTitleExpr = `btrim(regexp_replace(regexp_replace(regexp_replace(` +
+	`lower(regexp_replace(j.title, '([a-z])New$', '\1')),` +
+	` '[^a-z0-9]+', ' ', 'g'),` +
+	` '\m(senior|sr|junior|jr|lead|staff|principal|intermediate|associate|ii|iii|iv|[0-9]+)\M', ' ', 'g'),` +
+	` '\s+', ' ', 'g'))`
+
+// titleClause narrows "matches" to one title family when $3 is set ("" = all).
+// $3 carries the normalized family key from the chips.
+const titleClause = ` AND ($3 = '' OR ` + normTitleExpr + ` = lower(btrim($3)))`
 
 // Overview holds everything the stats page renders.
 type Overview struct {
@@ -346,19 +360,24 @@ func (r *Repo) verdicts(ctx context.Context, o *Overview) error {
 	return rows.Err()
 }
 
-// titles ranks the exact job titles among matches (case/space-normalized, one
-// row per distinct title — not word tokens), same shape as the companies list:
-// "which titles match me most, and how well".
+// titles ranks title FAMILIES among matches (normTitleExpr buckets — "Lead /
+// Senior / II" variants fold into one row), same shape as the companies list:
+// "which roles match me most, and how well".
 func (r *Repo) titles(ctx context.Context, o *Overview) error {
 	rows, err := r.q.Query(ctx, `
-        SELECT min(j.title), count(DISTINCT e.job_id) AS n,
-               round(avg(e.avg_score)::numeric, 1)
-        FROM evaluated_jobs e
-        JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
-        WHERE e.sys_profile = $1 AND e.avg_score >= $2
-          AND COALESCE(j.title, '') <> ''
-        GROUP BY lower(btrim(j.title))
-        ORDER BY n DESC, 3 DESC
+        SELECT k, initcap(k), n, avg
+        FROM (
+          SELECT `+normTitleExpr+` AS k,
+                 count(DISTINCT e.job_id) AS n,
+                 round(avg(e.avg_score)::numeric, 1) AS avg
+          FROM evaluated_jobs e
+          JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
+          WHERE e.sys_profile = $1 AND e.avg_score >= $2
+            AND COALESCE(j.title, '') <> ''
+          GROUP BY 1
+        ) d
+        WHERE k <> ''
+        ORDER BY n DESC, avg DESC
         LIMIT 12`,
 		o.Profile, o.Threshold)
 	if err != nil {
@@ -367,7 +386,7 @@ func (r *Repo) titles(ctx context.Context, o *Overview) error {
 	defer rows.Close()
 	for rows.Next() {
 		var t Company
-		if err := rows.Scan(&t.Name, &t.N, &t.AvgScore); err != nil {
+		if err := rows.Scan(&t.Key, &t.Name, &t.N, &t.AvgScore); err != nil {
 			return err
 		}
 		o.TopTitles = append(o.TopTitles, t)
