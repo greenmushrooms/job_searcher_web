@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>job searcher — live demo</title>
+<style>
+  body { font: 14px/1.55 system-ui, sans-serif; max-width: 760px; margin: 1.5rem auto; padding: 0 1rem; color: #222; background: #fff; }
+  h1 { font-size: 24px; margin: 0 0 .3rem; }
+  h2 { font-size: 13px; color: #898781; text-transform: uppercase; letter-spacing: .05em; margin: 1.8rem 0 .6rem; font-weight: 600; }
+  .demo-badge { display: inline-block; background: #fdf6e3; border: 1px solid #f0c36d; color: #7a4a00; border-radius: 999px; padding: .2rem .8rem; font-size: 12px; font-weight: 600; margin-bottom: .9rem; }
+  .hero { font-size: 15px; color: #333; }
+  .hero b { color: #1a4ed8; }
+  .numbers { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1.1rem 0; }
+  .num { flex: 1 1 140px; border: 1px solid #e3e3e3; border-radius: 6px; padding: .7rem .9rem; }
+  .num .v { font-size: 22px; font-weight: 650; }
+  .num .l { font-size: 11.5px; color: #898781; }
+  .feature { display: grid; grid-template-columns: 34px 1fr; gap: .6rem; margin: .7rem 0; align-items: baseline; }
+  .feature .ico { font-size: 18px; text-align: center; }
+  .feature b a { color: #1a4ed8; text-decoration: none; }
+  .feature b a:hover { text-decoration: underline; }
+  .feature .d { color: #52514e; font-size: 13px; }
+  .cta { display: inline-block; margin-top: 1.4rem; padding: .55rem 1.3rem; background: #1a4ed8; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14.5px; font-weight: 600; }
+  .cta:hover { background: #1340b5; }
+  .fine { color: #898781; font-size: 11.5px; margin-top: 1.6rem; }
+</style>
+</head>
+<body>
+  {{ template "topnav" "welcome" }}
+
+  <span class="demo-badge">⚠ read-only demo — browse everything, change nothing</span>
+  <h1>A job search that runs itself</h1>
+  <div class="hero">
+    This is a live demo of a personal job-hunting pipeline. The real thing works like this:
+    every evening at <b>18:00</b> a scraper pulls fresh postings for your saved searches;
+    overnight an LLM reads each one against <i>your</i> résumé and scores the fit;
+    and by <b>8am your inbox is full</b> of ranked matches — read the good ones, skip the rest,
+    tailor a résumé in one click when you're ready to apply.
+  </div>
+
+  <div class="numbers">
+    <div class="num"><div class="v">{{ .Scraped }}</div><div class="l">postings scraped so far</div></div>
+    <div class="num"><div class="v">{{ .Evaluated }}</div><div class="l">read &amp; scored by the LLM</div></div>
+    <div class="num"><div class="v">{{ .Matches }}</div><div class="l">strong matches surfaced</div></div>
+  </div>
+
+  <h2>What to poke at</h2>
+  <div class="feature"><span class="ico">📥</span><span><b><a href="/jobs.html">Jobs</a></b>
+    <div class="d">The inbox: unread matches ranked by score, apply/skip triage, and a full résumé workspace per job — AI-tailored bullet suggestions, version history, cover letters, and one-click PDFs.</div></span></div>
+  <div class="feature"><span class="ico">📊</span><span><b><a href="/stats">Stats</a></b>
+    <div class="d">The whole pipeline's history: application funnel (including who ghosted you), salary distribution split by seniority tier, and which job titles &amp; companies match you most — click any title to filter everything.</div></span></div>
+  <div class="feature"><span class="ico">⚙️</span><span><b><a href="/settings">Search settings</a></b>
+    <div class="d">What the nightly scrape hunts for — one line per search: a title, a location, and how many results to pull.</div></span></div>
+  <div class="feature"><span class="ico">📄</span><span><b><a href="/resume/ingest">Import résumé</a></b>
+    <div class="d">Paste your résumé in any form — the parser structures it without embellishing a word. The more complete it is, the better the match scoring and tailoring get: it's what the LLM reads on your behalf every night.</div></span></div>
+  <div class="feature"><span class="ico">🔬</span><span><b><a href="/v4">Diff lab</a></b>
+    <div class="d">Side-by-side view of the master résumé vs a job-tailored version, with the changes highlighted.</div></span></div>
+
+  <a class="cta" href="/jobs.html">Browse the inbox →</a>
+
+  <div class="fine">
+    The job postings and pipeline history here are real (and refresh daily); the person is not —
+    you're browsing as “Alex Sample”, a synthetic profile, and all writes are disabled.
+    Built with Go, htmx, Postgres, and a self-hosted LLM eval queue.
+  </div>
+</body>
+</html>

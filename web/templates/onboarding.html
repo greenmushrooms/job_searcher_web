@@ -1,0 +1,23 @@
+{{- /* First-run hints, served by /ui/onboarding only while the profile is
+       missing a résumé or searches (empty response otherwise). Dismissal is
+       per-browser: the checkbox stores a localStorage flag jobs.html checks
+       before requesting this fragment. */ -}}
+<div class="onboard" id="onboarding-box">
+  <div class="ob-title">👋 Welcome! Two things and the machine does the rest</div>
+  <ol class="ob-steps">
+    <li{{ if .HasResume }} class="done"{{ end }}>
+      {{ if .HasResume }}✓{{ else }}1.{{ end }}
+      <a href="/resume/ingest"><b>Import your résumé</b></a> — paste it in any form.
+      The more complete it is, the better your match scores and tailoring get; it's what the AI reads on your behalf every night.
+    </li>
+    <li{{ if .HasSearches }} class="done"{{ end }}>
+      {{ if .HasSearches }}✓{{ else }}2.{{ end }}
+      <a href="/settings"><b>Add your searches</b></a> — one line per search: job title + location + how many results to pull.
+    </li>
+  </ol>
+  <div class="ob-then">Then you're done: the scrape runs nightly at <b>18:00</b>, the AI scores every posting against your résumé overnight, and ranked matches fill this inbox by <b>8am</b>. Come back, read the good ones, skip the rest.</div>
+  <label class="ob-dismiss">
+    <input type="checkbox" onchange="localStorage.setItem('hideOnboarding','1'); document.getElementById('onboarding-box').remove()">
+    don't show this again
+  </label>
+</div>
