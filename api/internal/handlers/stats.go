@@ -177,10 +177,13 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 		}
 		return "/stats/" + variant
 	}
-	activeTitle := func(t string) bool { return strings.EqualFold(strings.TrimSpace(t), strings.TrimSpace(o.TitleFilter)) }
+	activeTitle := func(key string) bool { return strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(o.TitleFilter)) }
 	allN := 0
 	for _, t := range o.TopTitles {
 		allN += t.N
+		if activeTitle(t.Key) {
+			v.FilterTitle = t.Name // show the display form, not the lowercase key
+		}
 	}
 	v.Chips = []statsChip{{Label: "All titles", N: allN, Href: chipHref(""), Active: o.TitleFilter == ""}}
 	for i, t := range o.TopTitles {
@@ -188,7 +191,7 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 			break
 		}
 		v.Chips = append(v.Chips, statsChip{
-			Label: t.Name, N: t.N, Href: chipHref(t.Name), Active: activeTitle(t.Name),
+			Label: t.Name, N: t.N, Href: chipHref(t.Key), Active: activeTitle(t.Key),
 		})
 	}
 
@@ -200,8 +203,8 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 	v.EvalTotal = groupInt(o.Summary.Evaluated)
 	v.ScrapeTotal = groupInt(o.Summary.Scraped)
 	matchLabel := "Matches ≥ " + v.Threshold
-	if o.TitleFilter != "" {
-		matchLabel += " · " + o.TitleFilter
+	if v.FilterTitle != "" {
+		matchLabel += " · " + v.FilterTitle
 	}
 	v.Tiles = []statsTile{
 		{Label: "Jobs scraped", Value: groupInt(o.Summary.Scraped)},
@@ -283,7 +286,7 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 		v.TitleRows = append(v.TitleRows, statsCompanyRow{
 			Name: t.Name, N: t.N, Pct: pctOf(t.N, maxT),
 			AvgScore: fmt.Sprintf("%.1f", t.AvgScore),
-			Href:     chipHref(t.Name),
+			Href:     chipHref(t.Key),
 		})
 	}
 
