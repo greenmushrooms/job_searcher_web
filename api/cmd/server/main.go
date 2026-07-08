@@ -106,6 +106,13 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	// Public read-only sample instance: DEMO_PROFILE pins every request to a
+	// synthetic profile and rejects all writes. Runs as its own container on
+	// sample.jobs.* with no auth proxy; unset everywhere else.
+	if demo := strings.TrimSpace(os.Getenv("DEMO_PROFILE")); demo != "" {
+		r.Use(handlers.DemoReadOnly(demo))
+		log.Printf("read-only demo mode: all requests pinned to profile %q, writes disabled", demo)
+	}
 	r.Use(handlers.RestrictProfile(access)) // per-user profile isolation (no-op when unset)
 	// No global Timeout — set per-group below. chi's Timeout middleware
 	// applies the shortest deadline when nested, so a global default would
