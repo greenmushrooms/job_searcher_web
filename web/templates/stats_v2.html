@@ -214,15 +214,17 @@
     <h2>Top matched job titles</h2>
     {{ if .TitleRows }}
     <table>
-      <tr><th>title</th><th>matches</th><th>avg score</th></tr>
+      <tr><th>title</th><th>matches</th><th>senior-tier</th><th>avg score</th></tr>
       {{ range .TitleRows }}
       <tr>
         <td class="co" title="{{ .Name }} — click to filter"><a href="{{ .Href }}" style="color:inherit;text-decoration:none">{{ .Name }}</a><span class="inbar" style="width:{{ .Pct }}px"></span></td>
         <td>{{ .N }}</td>
+        <td>{{ .SrN }}</td>
         <td>{{ .AvgScore }}</td>
       </tr>
       {{ end }}
     </table>
+    <div class="note">Senior-tier = the posting's own title says senior / sr / staff / principal / lead.</div>
     {{ else }}<div class="empty">No matches yet.</div>{{ end }}
   </section>
 

@@ -53,6 +53,10 @@ type statsCompanyRow struct {
 	Pct      int    // bar width, % of max
 	AvgScore string
 	Href     string // set on title rows — clicking filters the page by that title
+	// Title rows only: seniority split of N on the same scale as Pct.
+	SrN     int
+	SrPct   int // senior-tier segment width
+	RestPct int // remaining segment width
 }
 
 type statsVerdictRow struct {
@@ -287,6 +291,9 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 			Name: t.Name, N: t.N, Pct: pctOf(t.N, maxT),
 			AvgScore: fmt.Sprintf("%.1f", t.AvgScore),
 			Href:     chipHref(t.Key),
+			SrN:      t.Senior,
+			SrPct:    pctOf(t.Senior, maxT),
+			RestPct:  pctOf(t.N-t.Senior, maxT),
 		})
 	}
 
