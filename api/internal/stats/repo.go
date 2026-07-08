@@ -93,28 +93,28 @@ type Funnel struct {
 	Ghosted   int // still 'applied', no outcome, GhostAfterDays+ old
 }
 
-// verdictClause narrows "matches" to one evaluator verdict when $3 is set
-// (” = all). The CASE guards the jsonb cast against non-JSON reasoning rows.
-const verdictClause = ` AND ($3 = '' OR
-    CASE WHEN left(e.reasoning, 1) = '{' THEN e.reasoning::jsonb->>'verdict' END = $3)`
+// titleClause narrows "matches" to one job title when $3 is set ("" = all).
+// Compared case/space-insensitively against jobspy_jobs alias j, which every
+// filtered query joins.
+const titleClause = ` AND ($3 = '' OR lower(btrim(j.title)) = lower(btrim($3)))`
 
 // Overview holds everything the stats page renders.
 type Overview struct {
-	Profile   string
-	Threshold float64
-	Verdict   string // active verdict filter, "" = all
-	Summary   Summary
-	Funnel    Funnel
-	Weekly    []WeekRow
-	Salaries  Salaries
-	Companies []Company
-	Verdicts  []Verdict    // always unfiltered — feeds the filter chips
-	TopTitles []Company    // top matched job titles (grouped, not tokenized)
-	Gaps      []TitleToken // frequent words in the evaluator's key_gap notes
+	Profile     string
+	Threshold   float64
+	TitleFilter string // active job-title filter, "" = all
+	Summary     Summary
+	Funnel      Funnel
+	Weekly      []WeekRow
+	Salaries    Salaries
+	Companies   []Company
+	Verdicts    []Verdict    // verdict breakdown of the (title-filtered) matches
+	TopTitles   []Company    // top matched job titles — always unfiltered, feeds the chips
+	Gaps        []TitleToken // frequent words in the evaluator's key_gap notes
 }
 
-func (r *Repo) Overview(ctx context.Context, profile, verdict string) (*Overview, error) {
-	o := &Overview{Profile: profile, Threshold: thresholdDefault, Verdict: verdict}
+func (r *Repo) Overview(ctx context.Context, profile, titleFilter string) (*Overview, error) {
+	o := &Overview{Profile: profile, Threshold: thresholdDefault, TitleFilter: titleFilter}
 	if err := r.summary(ctx, o); err != nil {
 		return nil, err
 	}
@@ -147,11 +147,14 @@ func (r *Repo) summary(ctx context.Context, o *Overview) error {
         SELECT
           (SELECT count(*) FROM jobspy_jobs WHERE sys_profile = $1),
           count(DISTINCT e.job_id),
-          count(DISTINCT e.job_id) FILTER (WHERE e.avg_score >= $2`+verdictClause+`),
+          (SELECT count(DISTINCT e2.job_id)
+             FROM evaluated_jobs e2
+             JOIN jobspy_jobs j ON j.id = e2.job_id AND j.sys_profile = e2.sys_profile
+             WHERE e2.sys_profile = $1 AND e2.avg_score >= $2`+titleClause+`),
           COALESCE(avg(e.avg_score), 0)
         FROM evaluated_jobs e
         WHERE e.sys_profile = $1`,
-		o.Profile, o.Threshold, o.Verdict,
+		o.Profile, o.Threshold, o.TitleFilter,
 	).Scan(&o.Summary.Scraped, &o.Summary.Evaluated, &o.Summary.Matches, &o.Summary.AvgScore)
 	if err != nil {
 		return err
@@ -198,12 +201,13 @@ func (r *Repo) weekly(ctx context.Context, o *Overview) error {
         SELECT
           date_trunc('week', e.created_at)::date::text,
           count(DISTINCT e.job_id),
-          count(DISTINCT e.job_id) FILTER (WHERE e.avg_score >= $2`+verdictClause+`)
+          count(DISTINCT e.job_id) FILTER (WHERE e.avg_score >= $2`+titleClause+`)
         FROM evaluated_jobs e
+        LEFT JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
         WHERE e.sys_profile = $1
           AND e.created_at >= now() - interval '13 weeks'
         GROUP BY 1 ORDER BY 1`,
-		o.Profile, o.Threshold, o.Verdict)
+		o.Profile, o.Threshold, o.TitleFilter)
 	if err != nil {
 		return err
 	}
@@ -226,7 +230,8 @@ func (r *Repo) salaries(ctx context.Context, o *Overview) error {
         WITH best AS (
           SELECT DISTINCT ON (e.job_id) e.job_id
           FROM evaluated_jobs e
-          WHERE e.sys_profile = $1 AND e.avg_score >= $2`+verdictClause+`
+          JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
+          WHERE e.sys_profile = $1 AND e.avg_score >= $2`+titleClause+`
           ORDER BY e.job_id, e.avg_score DESC
         )
         SELECT
@@ -243,7 +248,7 @@ func (r *Repo) salaries(ctx context.Context, o *Overview) error {
         WHERE j.min_amount ~ '^[0-9]+(\.[0-9]+)?$'
           AND j.max_amount ~ '^[0-9]+(\.[0-9]+)?$'
           AND j.min_amount::numeric > 0`,
-		o.Profile, o.Threshold, o.Verdict)
+		o.Profile, o.Threshold, o.TitleFilter)
 	if err != nil {
 		return err
 	}
@@ -296,13 +301,13 @@ func (r *Repo) companies(ctx context.Context, o *Overview) error {
                round(avg(e.avg_score)::numeric, 1)
         FROM evaluated_jobs e
         JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
-        WHERE e.sys_profile = $1 AND e.avg_score >= $2`+verdictClause+`
+        WHERE e.sys_profile = $1 AND e.avg_score >= $2`+titleClause+`
           AND COALESCE(j.company, '') <> ''
         GROUP BY 1
         HAVING count(DISTINCT e.job_id) >= 2
         ORDER BY n DESC, 3 DESC
         LIMIT 12`,
-		o.Profile, o.Threshold, o.Verdict)
+		o.Profile, o.Threshold, o.TitleFilter)
 	if err != nil {
 		return err
 	}
@@ -319,12 +324,14 @@ func (r *Repo) companies(ctx context.Context, o *Overview) error {
 
 func (r *Repo) verdicts(ctx context.Context, o *Overview) error {
 	rows, err := r.q.Query(ctx, `
-        SELECT COALESCE(NULLIF(reasoning::jsonb->>'verdict', ''), 'unknown'), count(*)
-        FROM evaluated_jobs
-        WHERE sys_profile = $1 AND avg_score >= $2
-          AND reasoning IS NOT NULL AND left(reasoning, 1) = '{'
+        SELECT COALESCE(NULLIF(e.reasoning::jsonb->>'verdict', ''), 'unknown'),
+               count(DISTINCT e.job_id)
+        FROM evaluated_jobs e
+        JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
+        WHERE e.sys_profile = $1 AND e.avg_score >= $2`+titleClause+`
+          AND e.reasoning IS NOT NULL AND left(e.reasoning, 1) = '{'
         GROUP BY 1 ORDER BY 2 DESC`,
-		o.Profile, o.Threshold)
+		o.Profile, o.Threshold, o.TitleFilter)
 	if err != nil {
 		return err
 	}
@@ -348,12 +355,12 @@ func (r *Repo) titles(ctx context.Context, o *Overview) error {
                round(avg(e.avg_score)::numeric, 1)
         FROM evaluated_jobs e
         JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
-        WHERE e.sys_profile = $1 AND e.avg_score >= $2`+verdictClause+`
+        WHERE e.sys_profile = $1 AND e.avg_score >= $2
           AND COALESCE(j.title, '') <> ''
         GROUP BY lower(btrim(j.title))
         ORDER BY n DESC, 3 DESC
         LIMIT 12`,
-		o.Profile, o.Threshold, o.Verdict)
+		o.Profile, o.Threshold)
 	if err != nil {
 		return err
 	}
@@ -380,8 +387,9 @@ func (r *Repo) gaps(ctx context.Context, o *Overview) error {
           SELECT DISTINCT ON (e.job_id) e.job_id,
                  e.reasoning::jsonb->>'key_gap' AS gap
           FROM evaluated_jobs e
+          JOIN jobspy_jobs j ON j.id = e.job_id AND j.sys_profile = e.sys_profile
           WHERE e.sys_profile = $1 AND e.avg_score >= $2
-            AND left(e.reasoning, 1) = '{'`+verdictClause+`
+            AND left(e.reasoning, 1) = '{'`+titleClause+`
           ORDER BY e.job_id, e.avg_score DESC
         ), tokens AS (
           SELECT job_id, regexp_split_to_table(lower(gap), '[^a-z0-9+#]+') AS tok
@@ -442,7 +450,7 @@ func (r *Repo) gaps(ctx context.Context, o *Overview) error {
             'leading')
         GROUP BY 1 ORDER BY n DESC
         LIMIT 14`,
-		o.Profile, o.Threshold, o.Verdict)
+		o.Profile, o.Threshold, o.TitleFilter)
 	if err != nil {
 		return err
 	}

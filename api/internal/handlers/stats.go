@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
@@ -49,8 +50,9 @@ type statsSalaryBin struct {
 type statsCompanyRow struct {
 	Name     string
 	N        int
-	Pct      int // bar width, % of max
+	Pct      int    // bar width, % of max
 	AvgScore string
+	Href     string // set on title rows — clicking filters the page by that title
 }
 
 type statsVerdictRow struct {
@@ -124,9 +126,9 @@ type statsView struct {
 	TitleRows []statsCompanyRow // top matched job titles, companies-style
 	Gaps      []statsTokenRow
 
-	// Verdict filter state: "" = all matches.
-	FilterVerdict string
-	Chips         []statsChip
+	// Job-title filter state: "" = all matches.
+	FilterTitle string
+	Chips       []statsChip
 
 	// Application funnel: cumulative stages + outcome split of Applied.
 	Funnel    []statsFunnelRow
@@ -138,12 +140,12 @@ type statsView struct {
 }
 
 // Page handles GET /stats and /stats/v{1,2} — the full stats page.
-// ?verdict=Lateral narrows every match-derived section (salary, weekly
-// matches, companies, title words, gaps) to that evaluator verdict.
+// ?title=Data+Engineer narrows every match-derived section (salary, weekly
+// matches, companies, verdicts, gaps) to that job title.
 func (h *StatsHandler) Page(w http.ResponseWriter, r *http.Request, variant string) {
 	q := r.URL.Query()
 	profile := profiles.Resolve(r.Context(), q.Get("profile"))
-	o, err := h.Stats.Overview(r.Context(), profile, q.Get("verdict"))
+	o, err := h.Stats.Overview(r.Context(), profile, q.Get("title"))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -153,36 +155,40 @@ func (h *StatsHandler) Page(w http.ResponseWriter, r *http.Request, variant stri
 
 func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 	v := statsView{
-		Profile:       o.Profile,
-		Variant:       variant,
-		Threshold:     trimFloat(o.Threshold),
-		Summary:       o.Summary,
-		FilterVerdict: o.Verdict,
+		Profile:     o.Profile,
+		Variant:     variant,
+		Threshold:   trimFloat(o.Threshold),
+		Summary:     o.Summary,
+		FilterTitle: o.TitleFilter,
 	}
 
-	// Filter chips: All + one per verdict seen among matches. Hrefs keep the
-	// explicit ?profile= param when one was given (harmless when pinned).
-	chipHref := func(verdict string) string {
+	// Filter chips: All + the top matched job titles. Hrefs keep the explicit
+	// ?profile= param when one was given (harmless when pinned).
+	chipHref := func(title string) string {
 		vals := url.Values{}
 		if profileParam != "" {
 			vals.Set("profile", profileParam)
 		}
-		if verdict != "" {
-			vals.Set("verdict", verdict)
+		if title != "" {
+			vals.Set("title", title)
 		}
 		if enc := vals.Encode(); enc != "" {
 			return "?" + enc
 		}
 		return "/stats/" + variant
 	}
+	activeTitle := func(t string) bool { return strings.EqualFold(strings.TrimSpace(t), strings.TrimSpace(o.TitleFilter)) }
 	allN := 0
-	for _, vd := range o.Verdicts {
-		allN += vd.N
+	for _, t := range o.TopTitles {
+		allN += t.N
 	}
-	v.Chips = []statsChip{{Label: "All verdicts", N: allN, Href: chipHref(""), Active: o.Verdict == ""}}
-	for _, vd := range o.Verdicts {
+	v.Chips = []statsChip{{Label: "All titles", N: allN, Href: chipHref(""), Active: o.TitleFilter == ""}}
+	for i, t := range o.TopTitles {
+		if i >= 8 { // chips row stays one line-ish; the full list is the titles section
+			break
+		}
 		v.Chips = append(v.Chips, statsChip{
-			Label: vd.Name, N: vd.N, Href: chipHref(vd.Name), Active: o.Verdict == vd.Name,
+			Label: t.Name, N: t.N, Href: chipHref(t.Name), Active: activeTitle(t.Name),
 		})
 	}
 
@@ -194,8 +200,8 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 	v.EvalTotal = groupInt(o.Summary.Evaluated)
 	v.ScrapeTotal = groupInt(o.Summary.Scraped)
 	matchLabel := "Matches ≥ " + v.Threshold
-	if o.Verdict != "" {
-		matchLabel += " · " + o.Verdict
+	if o.TitleFilter != "" {
+		matchLabel += " · " + o.TitleFilter
 	}
 	v.Tiles = []statsTile{
 		{Label: "Jobs scraped", Value: groupInt(o.Summary.Scraped)},
@@ -277,6 +283,7 @@ func buildStatsView(o *stats.Overview, variant, profileParam string) statsView {
 		v.TitleRows = append(v.TitleRows, statsCompanyRow{
 			Name: t.Name, N: t.N, Pct: pctOf(t.N, maxT),
 			AvgScore: fmt.Sprintf("%.1f", t.AvgScore),
+			Href:     chipHref(t.Name),
 		})
 	}
 

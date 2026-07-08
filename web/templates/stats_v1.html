@@ -99,7 +99,7 @@
 
   /* verdict filter chips — one row, scopes every match-derived section below */
   .chips { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .9rem; font-size: 12px; }
-  .chip { padding: .22rem .7rem; border: 1px solid #ddd; border-radius: 999px; color: #555; text-decoration: none; background: #fff; }
+  .chip { padding: .22rem .7rem; border: 1px solid #ddd; border-radius: 999px; color: #555; text-decoration: none; background: #fff; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chip:hover { border-color: #1a4ed8; color: #1a4ed8; }
   .chip.active { background: #1a4ed8; border-color: #1a4ed8; color: #fff; }
   .chip .cn { opacity: .75; margin-left: .25rem; }
@@ -223,18 +223,19 @@
       {{ if .TitleRows }}
       <div class="rowlist">
         {{ range .TitleRows }}
-        <div class="rl-row" title="{{ .Name }}: {{ .N }} matches, avg score {{ .AvgScore }}">
-          <span class="rl-name">{{ .Name }}</span>
+        <div class="rl-row" title="{{ .Name }}: {{ .N }} matches, avg score {{ .AvgScore }} — click to filter">
+          <span class="rl-name"><a href="{{ .Href }}" style="color:inherit;text-decoration:none">{{ .Name }}</a></span>
           <span class="rl-track"><span class="rl-bar" style="width:{{ .Pct }}%"></span></span>
           <span class="rl-n"><b>{{ .N }}</b> · avg {{ .AvgScore }}</span>
         </div>
         {{ end }}
       </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:.5rem">Click a title (or a chip above) to narrow every section to it.</div>
       {{ else }}<div class="empty">No matches yet.</div>{{ end }}
     </div>
 
     <div class="card">
-      <h2>Common gaps flagged by the evaluator{{ if .FilterVerdict }} — {{ .FilterVerdict }}{{ end }}</h2>
+      <h2>Common gaps flagged by the evaluator{{ if .FilterTitle }} — {{ .FilterTitle }}{{ end }}</h2>
       {{ if .Gaps }}
       <div class="rowlist">
         {{ range .Gaps }}

@@ -91,7 +91,7 @@
 
   /* verdict filter chips */
   .chips { display: flex; gap: .35rem; flex-wrap: wrap; margin: -.5rem 0 1.2rem; font-size: 12px; }
-  .chip { padding: .22rem .7rem; border: 1px solid #ddd; border-radius: 999px; color: #555; text-decoration: none; background: #fff; }
+  .chip { padding: .22rem .7rem; border: 1px solid #ddd; border-radius: 999px; color: #555; text-decoration: none; background: #fff; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chip:hover { border-color: #1a4ed8; color: #1a4ed8; }
   .chip.active { background: #1a4ed8; border-color: #1a4ed8; color: #fff; }
   .chip .cn { opacity: .75; margin-left: .25rem; }
@@ -185,7 +185,7 @@
       <tr><th>company</th><th>matches</th><th>avg score</th></tr>
       {{ range .Companies }}
       <tr>
-        <td class="co" title="{{ .Name }}">{{ .Name }}<span class="inbar" style="width:{{ .Pct }}px"></span></td>
+        <td class="co" title="{{ .Name }} — click to filter"><a href="{{ .Href }}" style="color:inherit;text-decoration:none">{{ .Name }}</a><span class="inbar" style="width:{{ .Pct }}px"></span></td>
         <td>{{ .N }}</td>
         <td>{{ .AvgScore }}</td>
       </tr>
@@ -217,7 +217,7 @@
       <tr><th>title</th><th>matches</th><th>avg score</th></tr>
       {{ range .TitleRows }}
       <tr>
-        <td class="co" title="{{ .Name }}">{{ .Name }}<span class="inbar" style="width:{{ .Pct }}px"></span></td>
+        <td class="co" title="{{ .Name }} — click to filter"><a href="{{ .Href }}" style="color:inherit;text-decoration:none">{{ .Name }}</a><span class="inbar" style="width:{{ .Pct }}px"></span></td>
         <td>{{ .N }}</td>
         <td>{{ .AvgScore }}</td>
       </tr>
@@ -227,7 +227,7 @@
   </section>
 
   <section>
-    <h2>Common gaps flagged by the evaluator{{ if .FilterVerdict }} — {{ .FilterVerdict }}{{ end }}</h2>
+    <h2>Common gaps flagged by the evaluator{{ if .FilterTitle }} — {{ .FilterTitle }}{{ end }}</h2>
     {{ if .Gaps }}
     <div class="tags">
       {{ range .Gaps }}<span class="tag" title="flagged on {{ .N }} matched jobs">{{ .Token }} <b>{{ .N }}</b></span>{{ end }}
