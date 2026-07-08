@@ -43,9 +43,9 @@ type statsSalaryBin struct {
 	Label   string // "80–100k"
 	N       int
 	SrN     int  // senior-tier postings in the bin
-	SrPct   int  // senior segment height, % of modal bin
-	RestPct int  // other-levels segment height, % of modal bin
-	IsModal bool // tallest bin — gets the direct label
+	SrPct   int  // senior bar height, % of the tallest single bar
+	RestPct int  // other-levels bar height, same scale
+	IsModal bool // tallest bin by total — gets the direct label
 }
 
 type statsCompanyRow struct {
@@ -117,6 +117,9 @@ type statsView struct {
 	SalaryP75  string
 	SalaryMin  string
 	SalaryMax  string
+	// Per-tier medians for the legend ("" when a tier has no postings).
+	SalarySrMedian   string
+	SalaryRestMedian string
 	// Percentile marker positions across the histogram x-range, in %.
 	P25Pos, P50Pos, P75Pos int
 	IQRWidth               int // P75Pos - P25Pos, for the band fill
@@ -213,10 +216,14 @@ func buildStatsView(o *stats.Overview, profileParam string) statsView {
 			Note: fmt.Sprintf("%d reached interview", o.Summary.Interview)},
 	}
 	if o.Salaries.N > 0 {
+		note := fmt.Sprintf("across %d postings with pay", o.Salaries.N)
+		if o.Salaries.SrN > 0 && o.Salaries.RestN > 0 {
+			note = fmt.Sprintf("senior %s · other %s", money(o.Salaries.SrMedian), money(o.Salaries.RestMedian))
+		}
 		v.Tiles = append(v.Tiles, statsTile{
 			Label: "Median salary (matches)",
 			Value: money(o.Salaries.Median),
-			Note:  fmt.Sprintf("across %d postings with pay", o.Salaries.N),
+			Note:  note,
 		})
 	}
 
@@ -343,6 +350,12 @@ func buildSalaryBins(v *statsView, s stats.Salaries) {
 	v.Salary = s
 	v.SalaryP25, v.SalaryP50, v.SalaryP75 = money(s.P25), money(s.Median), money(s.P75)
 	v.SalaryMin, v.SalaryMax = money(s.Min), money(s.Max)
+	if s.SrN > 0 {
+		v.SalarySrMedian = money(s.SrMedian)
+	}
+	if s.RestN > 0 {
+		v.SalaryRestMedian = money(s.RestMedian)
+	}
 
 	width := 20_000
 	if (s.Max-s.Min)/width > 14 {
@@ -360,10 +373,17 @@ func buildSalaryBins(v *statsView, s stats.Salaries) {
 		}
 	}
 	nBins := (hi - lo) / width
-	modal, modalIdx := 0, 0
+	// Grouped bars share one scale: the tallest single segment is 100%.
+	modalSeg, modalTotal, modalIdx := 0, 0, 0
 	for i := 0; i < nBins; i++ {
-		if counts[i] > modal {
-			modal, modalIdx = counts[i], i
+		if sr := srCounts[i]; sr > modalSeg {
+			modalSeg = sr
+		}
+		if rest := counts[i] - srCounts[i]; rest > modalSeg {
+			modalSeg = rest
+		}
+		if counts[i] > modalTotal {
+			modalTotal, modalIdx = counts[i], i
 		}
 	}
 	for i := 0; i < nBins; i++ {
@@ -373,9 +393,9 @@ func buildSalaryBins(v *statsView, s stats.Salaries) {
 			SrN:     srCounts[i],
 			IsModal: i == modalIdx,
 		}
-		if modal > 0 {
-			b.SrPct = pctOf(srCounts[i], modal)
-			b.RestPct = pctOf(counts[i]-srCounts[i], modal)
+		if modalSeg > 0 {
+			b.SrPct = pctOf(srCounts[i], modalSeg)
+			b.RestPct = pctOf(counts[i]-srCounts[i], modalSeg)
 		}
 		v.SalaryBins = append(v.SalaryBins, b)
 	}

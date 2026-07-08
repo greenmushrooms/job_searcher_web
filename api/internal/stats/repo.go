@@ -74,7 +74,7 @@ type SalaryMid struct {
 }
 
 // Salaries summarizes yearly-normalized midpoints of matched jobs that carry
-// a parseable compensation range.
+// a parseable compensation range, overall and split by seniority tier.
 type Salaries struct {
 	N        int // matches with usable comp
 	P25      int
@@ -82,6 +82,9 @@ type Salaries struct {
 	P75      int
 	Min, Max int
 	Mids     []SalaryMid // sorted by Mid, for binning in the handler
+
+	SrN, RestN           int // per-tier posting counts
+	SrMedian, RestMedian int // per-tier medians (0 when the tier is empty)
 }
 
 const thresholdDefault = 6.9
@@ -307,6 +310,17 @@ func (r *Repo) salaries(ctx context.Context, o *Overview) error {
 	s.P25 = percentile(ints, 0.25)
 	s.Median = percentile(ints, 0.50)
 	s.P75 = percentile(ints, 0.75)
+	var srInts, restInts []int // partitions of the sorted slice stay sorted
+	for _, m := range mids {
+		if m.Senior {
+			srInts = append(srInts, m.Mid)
+		} else {
+			restInts = append(restInts, m.Mid)
+		}
+	}
+	s.SrN, s.RestN = len(srInts), len(restInts)
+	s.SrMedian = percentile(srInts, 0.50)
+	s.RestMedian = percentile(restInts, 0.50)
 	return nil
 }
 
