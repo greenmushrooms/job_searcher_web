@@ -66,6 +66,13 @@ type TitleToken struct {
 	N     int
 }
 
+// SalaryMid is one matched posting's yearly-normalized comp midpoint, tagged
+// with whether its title was senior-tier (senior/sr/staff/principal/lead).
+type SalaryMid struct {
+	Mid    int
+	Senior bool
+}
+
 // Salaries summarizes yearly-normalized midpoints of matched jobs that carry
 // a parseable compensation range.
 type Salaries struct {
@@ -74,7 +81,7 @@ type Salaries struct {
 	Median   int
 	P75      int
 	Min, Max int
-	Mids     []int // sorted, for binning in the handler
+	Mids     []SalaryMid // sorted by Mid, for binning in the handler
 }
 
 const thresholdDefault = 6.9
@@ -259,7 +266,8 @@ func (r *Repo) salaries(ctx context.Context, o *Overview) error {
                 WHEN 'weekly'  THEN 52
                 WHEN 'monthly' THEN 12
                 ELSE 1
-              END)::bigint
+              END)::bigint,
+          lower(j.title) ~ '\m(senior|sr|staff|principal|lead)\M'
         FROM best b
         JOIN jobspy_jobs j ON j.id = b.job_id AND j.sys_profile = $1
         WHERE j.min_amount ~ '^[0-9]+(\.[0-9]+)?$'
@@ -270,30 +278,35 @@ func (r *Repo) salaries(ctx context.Context, o *Overview) error {
 		return err
 	}
 	defer rows.Close()
-	var mids []int
+	var mids []SalaryMid
 	for rows.Next() {
 		var m int64
-		if err := rows.Scan(&m); err != nil {
+		var sr bool
+		if err := rows.Scan(&m, &sr); err != nil {
 			return err
 		}
 		if m >= 20_000 && m <= 600_000 {
-			mids = append(mids, int(m))
+			mids = append(mids, SalaryMid{Mid: int(m), Senior: sr})
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	sort.Ints(mids)
+	sort.Slice(mids, func(a, b int) bool { return mids[a].Mid < mids[b].Mid })
+	ints := make([]int, len(mids))
+	for i, m := range mids {
+		ints[i] = m.Mid
+	}
 	s := &o.Salaries
 	s.Mids = mids
 	s.N = len(mids)
 	if s.N == 0 {
 		return nil
 	}
-	s.Min, s.Max = mids[0], mids[s.N-1]
-	s.P25 = percentile(mids, 0.25)
-	s.Median = percentile(mids, 0.50)
-	s.P75 = percentile(mids, 0.75)
+	s.Min, s.Max = ints[0], ints[s.N-1]
+	s.P25 = percentile(ints, 0.25)
+	s.Median = percentile(ints, 0.50)
+	s.P75 = percentile(ints, 0.75)
 	return nil
 }
 
