@@ -191,6 +191,21 @@
   <h1>jobs</h1>
   <div class="sub"><b>Unread</b> = no apply/skip decision yet · 📄 = résumé saved. Filters reload the list; default range is the last 2 weeks. <b>Search</b> finds any job by title/company/location across all scores &amp; dates.</div>
 
+  <!-- First-run hints: fetched only if this browser hasn't dismissed them;
+       the server returns nothing once the profile has a résumé + searches. -->
+  <style>
+    .onboard { border: 1px solid #c9d4f0; background: #f3f6fd; border-radius: 8px; padding: .9rem 1.1rem; margin-bottom: .9rem; font-size: 13.5px; }
+    .onboard .ob-title { font-weight: 700; font-size: 14.5px; margin-bottom: .4rem; }
+    .onboard .ob-steps { margin: .2rem 0 .5rem; padding-left: .2rem; list-style: none; }
+    .onboard .ob-steps li { margin: .3rem 0; }
+    .onboard .ob-steps li.done { color: #0a7d2e; }
+    .onboard .ob-steps a { color: #1a4ed8; }
+    .onboard .ob-then { color: #52514e; }
+    .onboard .ob-dismiss { display: inline-flex; gap: .35rem; align-items: center; margin-top: .6rem; font-size: 12px; color: #898781; cursor: pointer; }
+  </style>
+  <div id="onboarding" hx-get="/ui/onboarding" hx-trigger="load"></div>
+  <script>if (localStorage.getItem('hideOnboarding')) document.getElementById('onboarding').remove();</script>
+
   <div id="error-banner" role="alert">
     <span class="eb-msg"></span>
     <button type="button" class="eb-close" onclick="this.parentElement.classList.remove('show')">✕</button>

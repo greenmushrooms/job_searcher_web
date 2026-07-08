@@ -86,6 +86,7 @@ func main() {
 	searchCfgRepo := searchconfig.New(pool)
 
 	jh := &handlers.JobsHandler{Repo: jobsRepo}
+	obh := &handlers.OnboardingHandler{Pool: pool, Renderer: renderer}
 	ah := &handlers.ApplicationsHandler{Repo: appsRepo}
 	uh := &handlers.UIHandler{Repo: appsRepo, Renderer: renderer}
 	juh := &handlers.JobUIHandler{Jobs: jobsRepo, Apps: appsRepo, Templates: templatesRepo, Renderer: renderer}
@@ -109,9 +110,10 @@ func main() {
 	// Public read-only sample instance: DEMO_PROFILE pins every request to a
 	// synthetic profile and rejects all writes. Runs as its own container on
 	// sample.jobs.* with no auth proxy; unset everywhere else.
-	if demo := strings.TrimSpace(os.Getenv("DEMO_PROFILE")); demo != "" {
-		r.Use(handlers.DemoReadOnly(demo))
-		log.Printf("read-only demo mode: all requests pinned to profile %q, writes disabled", demo)
+	demoProfile := strings.TrimSpace(os.Getenv("DEMO_PROFILE"))
+	if demoProfile != "" {
+		r.Use(handlers.DemoReadOnly(demoProfile))
+		log.Printf("read-only demo mode: all requests pinned to profile %q, writes disabled", demoProfile)
 	}
 	r.Use(handlers.RestrictProfile(access)) // per-user profile isolation (no-op when unset)
 	// No global Timeout — set per-group below. chi's Timeout middleware
@@ -162,6 +164,7 @@ func main() {
 			r.Post("/resume/templates/{templateID}/default", rh.SetDefaultTemplate)
 
 			// Server-rendered job list + summary + apply/skip (OOB row update).
+			r.Get("/onboarding", obh.Fragment) // first-run hints, self-retiring
 			r.Get("/jobs", juh.JobList)
 			r.Get("/jobs/{id}/workspace", juh.JobWorkspace)
 			r.Get("/jobs/{id}/summary", juh.JobSummary)
@@ -182,10 +185,16 @@ func main() {
 		})
 	})
 
-	// Land on the résumé workspace.
-	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		http.Redirect(w, req, "/jobs.html", http.StatusFound)
-	})
+	// The demo greets visitors with a welcome/feature-tour page; the real
+	// instance lands straight on the résumé workspace.
+	if demoProfile != "" {
+		wh := &handlers.WelcomeHandler{Stats: statsRepo, Renderer: renderer}
+		r.Get("/", wh.Page)
+	} else {
+		r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+			http.Redirect(w, req, "/jobs.html", http.StatusFound)
+		})
+	}
 
 	// Diff-lab comparison pages — highlighting variants of the two-pane
 	// master-vs-job résumé editor, to pick one. v4 is the zero-JS, server-
