@@ -42,7 +42,9 @@ type statsBarPair struct {
 type statsSalaryBin struct {
 	Label   string // "80–100k"
 	N       int
-	Pct     int  // bar height, % of modal bin
+	SrN     int  // senior-tier postings in the bin
+	SrPct   int  // senior segment height, % of modal bin
+	RestPct int  // other-levels segment height, % of modal bin
 	IsModal bool // tallest bin — gets the direct label
 }
 
@@ -349,9 +351,13 @@ func buildSalaryBins(v *statsView, s stats.Salaries) {
 	lo := s.Min / width * width
 	hi := (s.Max/width + 1) * width
 
-	counts := map[int]int{}
+	counts, srCounts := map[int]int{}, map[int]int{}
 	for _, m := range s.Mids {
-		counts[(m-lo)/width]++
+		i := (m.Mid - lo) / width
+		counts[i]++
+		if m.Senior {
+			srCounts[i]++
+		}
 	}
 	nBins := (hi - lo) / width
 	modal, modalIdx := 0, 0
@@ -364,10 +370,12 @@ func buildSalaryBins(v *statsView, s stats.Salaries) {
 		b := statsSalaryBin{
 			Label:   binLabel(lo+i*width, lo+(i+1)*width),
 			N:       counts[i],
+			SrN:     srCounts[i],
 			IsModal: i == modalIdx,
 		}
 		if modal > 0 {
-			b.Pct = pctOf(counts[i], modal)
+			b.SrPct = pctOf(srCounts[i], modal)
+			b.RestPct = pctOf(counts[i]-srCounts[i], modal)
 		}
 		v.SalaryBins = append(v.SalaryBins, b)
 	}

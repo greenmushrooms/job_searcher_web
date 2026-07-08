@@ -56,7 +56,10 @@
           background-image: linear-gradient(to top, var(--grid) 1px, transparent 1px);
           background-size: 100% 25%; }
   .hbin { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; position: relative; }
-  .hbin .bar { width: 100%; max-width: 24px; background: var(--series-1); border-radius: 4px 4px 0 0; }
+  .hbin .stack { width: 100%; max-width: 24px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; }
+  .hbin .seg { width: 100%; border-radius: 3px; min-height: 2px; }
+  .hbin .seg-sr { background: #1c5cab; }
+  .hbin .seg-rest { background: #86b6ef; }
   .hbin .lbl { position: absolute; top: 100%; margin-top: 3px; font-size: 10px; color: var(--muted); white-space: nowrap; }
   .hbin .direct { position: absolute; bottom: 100%; margin-bottom: 2px; font-size: 10.5px; font-weight: 600; color: #222; }
   .pctile { position: relative; height: 34px; margin: 26px 4px 0; }
@@ -172,9 +175,12 @@
       {{ if .HasSalary }}
       <div class="hist">
         {{ range .SalaryBins }}
-        <div class="hbin" title="{{ .Label }}: {{ .N }} postings">
+        <div class="hbin" title="{{ .Label }}: {{ .N }} postings ({{ .SrN }} senior-tier)">
           {{ if .IsModal }}<span class="direct">{{ .N }}</span>{{ end }}
-          <div class="bar" style="height:{{ .Pct }}%"></div>
+          <div class="stack">
+            {{ if .RestPct }}<div class="seg seg-rest" style="height:{{ .RestPct }}%"></div>{{ end }}
+            {{ if .SrPct }}<div class="seg seg-sr" style="height:{{ .SrPct }}%"></div>{{ end }}
+          </div>
           <span class="lbl">{{ .Label }}</span>
         </div>
         {{ end }}
@@ -188,6 +194,8 @@
         <div class="mark" style="left:{{ .P75Pos }}%"><span class="mlbl">p75</span><span class="mval">{{ .SalaryP75 }}</span></div>
       </div>
       <div style="font-size:11px;color:var(--muted);margin-top:.6rem">
+        <span style="display:inline-block;width:9px;height:9px;background:#1c5cab;border-radius:2px;vertical-align:-1px"></span> senior-tier postings ·
+        <span style="display:inline-block;width:9px;height:9px;background:#86b6ef;border-radius:2px;vertical-align:-1px"></span> other levels.
         Yearly-normalized midpoints of the posted ranges (hourly ×2080). Range {{ .SalaryMin }}–{{ .SalaryMax }}; currencies mixed as posted (CAD/USD).
       </div>
       {{ else }}<div class="empty">No matched postings carry a parseable salary yet.</div>{{ end }}
