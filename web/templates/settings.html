@@ -19,6 +19,14 @@
   .add { margin-top: .2rem; padding: .35rem .9rem; background: #fff; color: #1a4ed8; border: 1px dashed #a9bce8; border-radius: 5px; cursor: pointer; font-size: 13px; }
   .add:hover { background: #f3f6fd; }
   .add:disabled { color: #aaa; border-color: #ddd; cursor: default; background: #fff; }
+  .suggest { margin-top: .2rem; margin-left: .35rem; padding: .35rem .9rem; background: #fff; color: #7a3fd1; border: 1px dashed #cdb4ee; border-radius: 5px; cursor: pointer; font-size: 13px; }
+  .suggest:hover { background: #f8f4fe; }
+  .suggest:disabled { color: #aaa; border-color: #ddd; cursor: default; background: #fff; }
+  #suggestions { margin-top: .6rem; }
+  .sugHead { font-size: 12px; color: #52514e; margin-bottom: .35rem; }
+  .sug { display: inline-block; margin: 0 .35rem .35rem 0; padding: .3rem .7rem; background: #f8f4fe; color: #5a2ea6; border: 1px solid #d9c8f2; border-radius: 999px; cursor: pointer; font-size: 12.5px; }
+  .sug:hover { background: #efe4fd; }
+  .sugLoc { color: #8a6cc0; margin-left: .3rem; }
   button.save { margin-top: 1.1rem; padding: .45rem 1.1rem; background: #1a4ed8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-size: 13.5px; }
   button.save:hover { background: #1340b5; }
   .total { margin-top: 1rem; font-size: 13px; color: #52514e; padding: .6rem .8rem; background: #f7f8fc; border: 1px solid #e3e6f0; border-radius: 6px; }
@@ -62,6 +70,8 @@
       </div>
     </template>
     <button type="button" class="add" id="addRow">＋ add a search</button>
+    <button type="button" class="suggest" id="suggestBtn">✨ suggest from résumé</button>
+    <div id="suggestions"></div>
 
     <div class="total">
       Each line is one scrape: that title, in that location, up to that many results.
@@ -115,6 +125,65 @@
       });
       rows.addEventListener('input', retotal);
       retotal();
+
+      // "Suggest from résumé": POST /settings/suggest returns chip HTML for
+      // this profile; clicking a chip prefills a row (blank one if present,
+      // else a new one). Nothing is saved until the Save button.
+      var suggestBtn = document.getElementById('suggestBtn');
+      var sugBox = document.getElementById('suggestions');
+      var SUGGEST_LABEL = suggestBtn.textContent;
+
+      function showSugError(msg) {
+        sugBox.textContent = '';
+        var d = document.createElement('div');
+        d.className = 'err';
+        d.textContent = '✗ ' + msg;
+        sugBox.appendChild(d);
+      }
+
+      suggestBtn.addEventListener('click', function () {
+        suggestBtn.disabled = true;
+        suggestBtn.textContent = '… reading your résumé';
+        fetch('/settings/suggest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ profile: document.querySelector('[name=profile]').value })
+        })
+          .then(function (res) {
+            if (res.ok) return res.text().then(function (html) { sugBox.innerHTML = html; });
+            return res.json()
+              .then(function (j) { showSugError(j.error || ('request failed (' + res.status + ')')); },
+                    function () { showSugError('request failed (' + res.status + ')'); });
+          })
+          .catch(function () { showSugError('network error — try again'); })
+          .finally(function () {
+            suggestBtn.disabled = false;
+            suggestBtn.textContent = SUGGEST_LABEL;
+          });
+      });
+
+      sugBox.addEventListener('click', function (e) {
+        var chip = e.target.closest('.sug');
+        if (!chip) return;
+        var row = null;
+        rows.querySelectorAll('.row').forEach(function (r) {
+          if (row) return;
+          if (!r.querySelector('[name=title]').value.trim() &&
+              !r.querySelector('[name=location]').value.trim()) row = r;
+        });
+        if (!row) {
+          if (rows.querySelectorAll('.row').length >= MAX_ROWS) {
+            showSugError('all ' + MAX_ROWS + ' lines are in use — remove one to add more');
+            return;
+          }
+          rows.appendChild(tpl.content.cloneNode(true));
+          row = rows.lastElementChild;
+        }
+        row.querySelector('[name=title]').value = chip.dataset.title;
+        row.querySelector('[name=location]').value = chip.dataset.location;
+        chip.remove();
+        retotal();
+      });
     })();
   </script>
 </body>

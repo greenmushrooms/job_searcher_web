@@ -1,0 +1,13 @@
+{{/* Fragment returned by POST /settings/suggest — inserted into #suggestions
+     on the settings page. Each chip carries the proposed search in data-
+     attributes; the page's JS turns a click into a prefilled form row. */}}
+{{ if .Error }}
+<div class="err">✗ {{ .Error }}</div>
+{{ else if .Suggestions }}
+<div class="sugHead">Suggested from your résumé — click to add, then Save:</div>
+{{ range .Suggestions }}
+<button type="button" class="sug" data-title="{{ .Title }}" data-location="{{ .Location }}" title="{{ .Reason }}">＋ {{ .Title }} <span class="sugLoc">{{ .Location }}</span></button>
+{{ end }}
+{{ else }}
+<div class="sugHead">No new suggestions — your saved searches already cover what the résumé shows.</div>
+{{ end }}

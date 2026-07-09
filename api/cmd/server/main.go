@@ -217,9 +217,11 @@ func main() {
 	// Per-profile search-criteria editor. Edits land in web.job_searches (one
 	// row per title+location+results); the morning box-db-sync pull propagates
 	// them to the pipeline's adm.job_searches for the next 18:00 scrape.
-	seh := &handlers.SettingsHandler{Config: searchCfgRepo, Pool: pool, Renderer: renderer}
+	seh := &handlers.SettingsHandler{Config: searchCfgRepo, Pool: pool, Renderer: renderer,
+		Master: masterRepo, DeepSeek: dsClient}
 	r.Get("/settings", seh.Page)
 	r.Post("/settings", seh.Save)
+	r.Post("/settings/suggest", seh.Suggest) // LLM search suggestions from the master résumé
 
 	// Résumé onboarding: paste any résumé, DeepSeek structures it into the
 	// canonical tables + master markdown (extraction only). The DeepSeek
