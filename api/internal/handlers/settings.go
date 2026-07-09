@@ -8,8 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/resumemaster"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/searchconfig"
 )
 
@@ -27,6 +29,8 @@ type SettingsHandler struct {
 	Config   *searchconfig.Repo
 	Pool     *pgxpool.Pool
 	Renderer *render.Renderer
+	Master   *resumemaster.Repo // suggestion input: the profile's master résumé
+	DeepSeek *deepseek.Client   // nil when DEEPSEEK_API_KEY is unset
 }
 
 type settingsRow struct {
@@ -156,4 +160,91 @@ func (h *SettingsHandler) Save(w http.ResponseWriter, r *http.Request) {
 		saved = c
 	}
 	h.Renderer.HTML(w, http.StatusOK, "settings", h.view(saved, true, ""))
+}
+
+// maxSuggestions bounds one suggest call's output — the form itself is capped
+// at MaxEntries rows, so more chips than this is noise.
+const maxSuggestions = 8
+
+type suggestView struct {
+	Suggestions []deepseek.SearchSuggestion
+	Error       string
+}
+
+// Suggest handles POST /settings/suggest: read the profile's master résumé,
+// ask the LLM for job-board queries it supports, and return chips the page's
+// JS inserts under the form. Chips only prefill rows — nothing is saved until
+// the user hits Save, so the existing cap/dedupe validation still applies.
+func (h *SettingsHandler) Suggest(w http.ResponseWriter, r *http.Request) {
+	fail := func(msg string) {
+		h.Renderer.HTML(w, http.StatusOK, "settings_suggest", suggestView{Error: msg})
+	}
+	if err := r.ParseForm(); err != nil {
+		fail("bad form")
+		return
+	}
+	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
+
+	if h.DeepSeek == nil {
+		fail("suggestions need DEEPSEEK_API_KEY configured on the server")
+		return
+	}
+	md, err := h.Master.Get(r.Context(), profile)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	if strings.TrimSpace(md) == "" {
+		fail(fmt.Sprintf("no master résumé saved for %s yet — add one on the résumé page first", profile))
+		return
+	}
+
+	c, err := h.Config.Get(r.Context(), profile)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	existing := make([]string, 0, len(c.Entries))
+	for _, e := range c.Entries {
+		existing = append(existing, e.Title+" — "+e.Location)
+	}
+
+	sugs, err := h.DeepSeek.SuggestSearches(r.Context(), md, existing)
+	if err != nil {
+		fail("suggestion call failed: " + err.Error())
+		return
+	}
+	h.Renderer.HTML(w, http.StatusOK, "settings_suggest",
+		suggestView{Suggestions: filterSuggestions(sugs, c.Entries)})
+}
+
+// filterSuggestions drops suggestions that would fail Save validation or
+// duplicate a saved search: blank or over-80-char fields, (title, location)
+// pairs already present (case-insensitively), repeats within the batch, and
+// anything past maxSuggestions.
+func filterSuggestions(sugs []deepseek.SearchSuggestion, entries []searchconfig.Entry) []deepseek.SearchSuggestion {
+	seen := map[string]bool{}
+	key := func(title, loc string) string {
+		return strings.ToLower(strings.TrimSpace(title)) + "\x00" + strings.ToLower(strings.TrimSpace(loc))
+	}
+	for _, e := range entries {
+		seen[key(e.Title, e.Location)] = true
+	}
+	out := make([]deepseek.SearchSuggestion, 0, maxSuggestions)
+	for _, s := range sugs {
+		s.Title, s.Location = strings.TrimSpace(s.Title), strings.TrimSpace(s.Location)
+		if s.Title == "" || s.Location == "" || len(s.Title) > 80 || len(s.Location) > 80 {
+			continue
+		}
+		k := key(s.Title, s.Location)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+		if len(out) == maxSuggestions {
+			break
+		}
+	}
+	return out
 }
