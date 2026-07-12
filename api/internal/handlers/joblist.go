@@ -60,6 +60,8 @@ type jobSummaryView struct {
 	Score        string
 	Verdict      string
 	Summary      string
+	WhyYouFit    string
+	KeyGap       string
 	TechStack    string
 	Compensation string
 	Status       string // "" == undecided
@@ -259,6 +261,8 @@ func toSummaryView(j jobs.Job, profile string) jobSummaryView {
 		Score:      fmtScore(j.Score),
 		Verdict:    reasoningStr(j.Reasoning, "verdict"),
 		Summary:    reasoningStr(j.Reasoning, "summary"),
+		WhyYouFit:  reasoningStr(j.Reasoning, "why_you_fit"),
+		KeyGap:     reasoningStr(j.Reasoning, "key_gap"),
 		TechStack:  reasoningStr(j.Reasoning, "tech_stack"),
 	}
 	if j.Application != nil {

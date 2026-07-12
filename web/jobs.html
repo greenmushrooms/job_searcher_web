@@ -67,6 +67,9 @@
   .job-summary h2 a { color: #1a4ed8; text-decoration: none; }
   .js-verdict { display: inline-block; padding: 1px 6px; border-radius: 3px; background: #eef; color: #339; font-size: 11px; text-transform: uppercase; vertical-align: middle; }
   .js-score { color: #0a7d2e; font-weight: 700; font-size: 20px; }
+  .js-share { margin-left: auto; white-space: nowrap; }
+  .js-fit { color: #0a7d2e; }
+  .js-gap { color: #9a6700; }
   .js-meta { color: #666; font-size: 12px; margin: .3rem 0 .7rem; }
   .js-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .03em; margin: .5rem 0 .15rem; }
   .js-text { font-size: 13px; line-height: 1.55; color: #333; }
@@ -313,6 +316,32 @@
       other.scrollTop = (t.scrollTop / denom) * Math.max(0, other.scrollHeight - other.clientHeight);
       requestAnimationFrame(function () { syncing = false; });
     }, true);
+  })();
+
+  // Shareable eval links: clicking a job records ?job=<id> in the address bar,
+  // and loading the page with ?job=<id> opens that job's workspace directly —
+  // so the URL in the bar is always a deep link to the eval on screen.
+  function copyJobLink(btn, id) {
+    var url = location.origin + '/jobs.html?job=' + encodeURIComponent(id);
+    navigator.clipboard.writeText(url).then(function () {
+      var old = btn.textContent;
+      btn.textContent = '✓ copied';
+      setTimeout(function () { btn.textContent = old; }, 1200);
+    });
+  }
+  (function () {
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+      if (!e.target || e.target.id !== 'job-detail') return;
+      var path = e.detail && e.detail.pathInfo && (e.detail.pathInfo.requestPath || e.detail.pathInfo.finalRequestPath) || '';
+      var m = path.match(/\/ui\/jobs\/([^/?]+)\/workspace/);
+      if (m) history.replaceState(null, '', '/jobs.html?job=' + m[1]);
+    });
+    var jobId = new URLSearchParams(location.search).get('job');
+    if (jobId) {
+      var profile = document.querySelector('#job-filters input[name="profile"]');
+      htmx.ajax('GET', '/ui/jobs/' + encodeURIComponent(jobId) + '/workspace?profile='
+        + encodeURIComponent(profile ? profile.value : ''), {target: '#job-detail', swap: 'innerHTML'});
+    }
   })();
 
   // Mount the v2 CodeMirror diff editors whenever the résumé workspace fragment
