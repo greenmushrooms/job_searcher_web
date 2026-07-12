@@ -10,6 +10,8 @@
       {{- if .Verdict }} <span class="js-verdict">{{ .Verdict }}</span>{{ end }}
     </h2>
     <span class="js-score">{{ .Score }}</span>
+    <button type="button" class="small js-share" title="copy a link to this eval"
+            onclick="copyJobLink(this, {{ .ID }})">🔗 share</button>
   </div>
   <div class="js-meta">
     {{- .Company }} · {{ .Location }}{{ if .IsRemote }} · remote{{ end }}
@@ -19,6 +21,14 @@
   {{- if .Summary }}
   <div class="js-label">summary</div>
   <div class="js-text">{{ .Summary }}</div>
+  {{- end }}
+  {{- if .WhyYouFit }}
+  <div class="js-label">why you fit</div>
+  <div class="js-text js-fit">✅ {{ .WhyYouFit }}</div>
+  {{- end }}
+  {{- if .KeyGap }}
+  <div class="js-label">key gap</div>
+  <div class="js-text js-gap">⚠️ {{ .KeyGap }}</div>
   {{- end }}
   {{- if .TechStack }}
   <div class="js-label">tech stack</div>
