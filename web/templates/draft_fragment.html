@@ -58,9 +58,10 @@
                   hx-include="closest form"
                   hx-indicator="#draft-spinner"
                   hx-disabled-elt="this">
-            ✨ Tailor with AI (~60s)
+            ✨ Tailor with AI (~30s)
           </button>
-          <span id="draft-spinner" class="htmx-indicator">tailoring against the job description…</span>
+          <span id="draft-spinner" class="htmx-indicator ai-progress"
+                data-phases="reading the job posting|scoring your bullets against it|choosing what to cut|drafting rewrites|polishing the suggestions">tailoring…</span>
           <div class="draft-hint">DeepSeek reads the job description and proposes cuts and rewrites against the <b>{{ .TemplateName }}</b> template. Suggestions land here, editable — nothing touches your working copy until you apply them.</div>
         </div>
         {{- else }}
@@ -76,12 +77,13 @@
           <button type="button" class="small secondary"
                   hx-post="/ui/jobs/{{ .JobID }}/draft"
                   hx-include="closest form"
-                  hx-confirm="Re-tailor? This calls DeepSeek again (~60s) and replaces your edits here."
+                  hx-confirm="Re-tailor? This calls DeepSeek again (~30s) and replaces your edits here."
                   hx-indicator="#draft-spinner"
                   hx-disabled-elt="this">
             ↻ re-tailor
           </button>
-          <span id="draft-spinner" class="htmx-indicator">tailoring…</span>
+          <span id="draft-spinner" class="htmx-indicator ai-progress"
+                data-phases="reading the job posting|scoring your bullets against it|choosing what to cut|drafting rewrites|polishing the suggestions">tailoring…</span>
         </div>
         {{- end }}
       </div>
