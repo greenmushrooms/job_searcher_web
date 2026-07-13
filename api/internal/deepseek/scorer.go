@@ -88,6 +88,9 @@ func (c *Client) scoreOne(ctx context.Context, jobText, bulletText string) (int,
 		},
 		ResponseFormat: &responseFormat{Type: "json_object"},
 		Temperature:    0, // deterministic scoring
+		// "default" (thinking on) until score parity without CoT is validated
+		// against the v10 calibration; override via env to experiment.
+		Thinking: thinkingMode("DEEPSEEK_SCORER_THINKING", "default"),
 	}
 	raw, err := c.post(ctx, "/chat/completions", reqBody)
 	if err != nil {

@@ -157,6 +157,9 @@ func (c *Client) Draft(ctx context.Context, jobDescription string, bullets []res
 		},
 		ResponseFormat: &responseFormat{Type: "json_object"},
 		Temperature:    0.2, // structured task, want stability
+		// Off by default: with thinking on, drafts spent ~90% of their wall
+		// time (and completion tokens) on CoT for the same thin diff.
+		Thinking: thinkingMode("DEEPSEEK_DRAFT_THINKING", "disabled"),
 	}
 	raw, err := c.post(ctx, "/chat/completions", reqBody)
 	if err != nil {
@@ -247,6 +250,28 @@ type chatRequest struct {
 	Messages       []chatMessage   `json:"messages"`
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
 	Temperature    float64         `json:"temperature,omitempty"`
+	Thinking       *thinkingConfig `json:"thinking,omitempty"`
+}
+
+// thinkingConfig toggles DeepSeek v4 chain-of-thought. Both v4 models reason
+// by default, billing the CoT as completion tokens: measured drafts spent
+// ~6-10k reasoning tokens to emit ~800 tokens of visible JSON, which is where
+// nearly all of the draft's wall time went.
+type thinkingConfig struct {
+	Type string `json:"type"` // "enabled" | "disabled"
+}
+
+// thinkingMode resolves a per-call thinking toggle: the env var ("enabled",
+// "disabled", or "default" for the API default) wins, otherwise def applies.
+func thinkingMode(envVar, def string) *thinkingConfig {
+	mode := os.Getenv(envVar)
+	if mode != "enabled" && mode != "disabled" && mode != "default" {
+		mode = def
+	}
+	if mode == "default" {
+		return nil
+	}
+	return &thinkingConfig{Type: mode}
 }
 
 type chatMessage struct {
