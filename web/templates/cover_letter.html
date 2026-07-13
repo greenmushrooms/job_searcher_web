@@ -16,7 +16,8 @@
               hx-disabled-elt="this">
         ✨ Start cover letter with AI
       </button>
-      <span id="cover-spinner" class="htmx-indicator">writing against the job description…</span>
+      <span id="cover-spinner" class="htmx-indicator ai-progress"
+            data-phases="reading the job posting|picking your strongest achievements|writing the letter|tightening the wording">writing…</span>
       <div class="draft-hint">DeepSeek writes a first draft grounded in the résumé saved for this job (or the full résumé if none is saved yet) — review and edit before sending. Personal bits it can't know land as [placeholders].</div>
     </div>
     {{- else }}
@@ -45,7 +46,8 @@
               hx-confirm="Re-draft with AI? This replaces the text below (unsaved edits are lost)."
               hx-indicator="#cover-spinner"
               hx-disabled-elt="this">↻ re-draft with AI</button>
-      <span id="cover-spinner" class="htmx-indicator">writing…</span>
+      <span id="cover-spinner" class="htmx-indicator ai-progress"
+            data-phases="reading the job posting|picking your strongest achievements|writing the letter|tightening the wording">writing…</span>
       {{- if .Note }}<span class="cl-note">{{ .Note }}</span>{{ end }}
     </div>
     {{- end }}
