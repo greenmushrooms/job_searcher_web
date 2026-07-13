@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -810,11 +812,6 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		return nil, nil, nil, &handlerErr{http.StatusInternalServerError, "load resume: " + err.Error()}
 	}
 
-	draft, err := h.DeepSeek.Draft(ctx, *job.Description, res.Bullets, doc.Education)
-	if err != nil {
-		return nil, nil, nil, &handlerErr{http.StatusBadGateway, "deepseek: " + err.Error()}
-	}
-
 	// v10: relevance scoring governs removals. The calibrated flash scorer
 	// (deepseek.ScoreBullets, "A_clean" prompt) ranks every bullet against the
 	// posting; the clamp(count≥threshold, floor, cap) rule in resumesuggest
@@ -822,14 +819,43 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 	// conservative removals. Rewrites are filtered to the kept set — rewriting a
 	// bullet we're about to cut is wasted. Best-effort: a scorer failure leaves
 	// the prompt's own removals/rewrites in place so a draft still works.
+	//
+	// The tailoring draft and the scorer don't feed each other, so they run
+	// concurrently — the scorer leg is otherwise pure added wall time.
 	jobText := *job.Description
 	if job.Title != nil && *job.Title != "" {
 		jobText = *job.Title + "\n" + *job.Description
 	}
-	var scores []deepseek.BulletScore
-	if sc, serr := h.DeepSeek.ScoreBullets(ctx, jobText, res.Bullets); serr == nil && len(sc) > 0 {
-		scores = sc
-		sel := resumesuggest.Select(buildRoleScores(res.Bullets, sc), resumesuggest.DefaultLimits, resumesuggest.DefaultThreshold, resumesuggest.DefaultImportantThreshold)
+	var (
+		draft            *deepseek.DraftResult
+		draftErr         error
+		draftMs, scoreMs int64
+		scores           []deepseek.BulletScore
+		scoreErr         error
+		wg               sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		t := time.Now()
+		draft, draftErr = h.DeepSeek.Draft(ctx, *job.Description, res.Bullets, doc.Education)
+		draftMs = time.Since(t).Milliseconds()
+	}()
+	go func() {
+		defer wg.Done()
+		t := time.Now()
+		scores, scoreErr = h.DeepSeek.ScoreBullets(ctx, jobText, res.Bullets)
+		scoreMs = time.Since(t).Milliseconds()
+	}()
+	wg.Wait()
+	if draftErr != nil {
+		return nil, nil, nil, &handlerErr{http.StatusBadGateway, "deepseek: " + draftErr.Error()}
+	}
+	if scoreErr != nil || len(scores) == 0 {
+		scores = nil
+	}
+	if scores != nil {
+		sel := resumesuggest.Select(buildRoleScores(res.Bullets, scores), resumesuggest.DefaultLimits, resumesuggest.DefaultThreshold, resumesuggest.DefaultImportantThreshold)
 		draft.Removals = scoreRemovals(res.Bullets, sel)
 		draft.Rewrites = keptRewrites(draft.Rewrites, sel)
 	}
@@ -845,6 +871,8 @@ func (h *ResumeHandler) draftAndPersist(ctx context.Context, jobID, profile, tem
 		"completion_tokens":   draft.Usage.CompletionTokens,
 		"total_tokens":        draft.Usage.TotalTokens,
 		"cost_usd":            draft.Usage.CostUSD,
+		"draft_ms":            draftMs,
+		"scorer_ms":           scoreMs,
 		"bullet_count":        len(res.Bullets),
 		"removals":            draft.Removals,
 		"rewrites":            draft.Rewrites,
