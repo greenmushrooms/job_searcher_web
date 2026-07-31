@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/applications"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/challenges"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
@@ -58,6 +59,7 @@ func main() {
 	jobsRepo := jobs.New(pool)
 	finalsRepo := finalizations.New(pool)
 	coverRepo := coverletters.New(pool)
+	challengeRepo := challenges.New(pool)
 	masterRepo := resumemaster.New(pool)
 	resumeRepo := resume.NewRepo(pool)
 	templatesRepo := templates.New(pool)
@@ -94,6 +96,7 @@ func main() {
 		Jobs:          jobsRepo,
 		Finalizations: finalsRepo,
 		CoverLetters:  coverRepo,
+		Challenges:    challengeRepo,
 		Master:        masterRepo,
 		Resumes:       resumeRepo,
 		Templates:     templatesRepo,
@@ -149,12 +152,15 @@ func main() {
 			r.Post("/jobs/{id}/replace-template", rh.ReplaceTemplate)
 			r.Get("/jobs/{id}/resume.pdf", rh.ResumePDF)
 			r.Post("/jobs/{id}/resume.pdf", rh.GeneratePDF)
-			r.Get("/jobs/{id}/resume/versions", rh.ResumeVersions)                 // SCD2 version history
+			r.Get("/jobs/{id}/resume/versions", rh.ResumeVersions) // SCD2 version history
 			r.Post("/jobs/{id}/resume/versions/{version}/restore", rh.RestoreResumeVersion)
 			r.Get("/jobs/{id}/cover-letter", rh.CoverLetterFragment)
 			r.Post("/jobs/{id}/cover-letter", rh.SaveCoverLetter)
 			r.Post("/jobs/{id}/cover-letter.pdf", rh.CoverLetterPDF)
-			r.Post("/resume/master", rh.SaveMaster) // diff lab: permanent master save
+			r.Get("/jobs/{id}/challenge", rh.ChallengeFragment)
+			r.Get("/jobs/{id}/challenge.zip", rh.ChallengeZip)
+			r.Post("/jobs/{id}/challenge/solution", rh.ChallengeSolution)
+			r.Post("/resume/master", rh.SaveMaster)    // diff lab: permanent master save
 			r.Post("/difflab/diff", rh.DiffLabCompute) // diff lab v4: zero-JS recompute
 
 			// Resume template manager (rename / delete / set default).
@@ -182,6 +188,7 @@ func main() {
 			r.Use(middleware.Timeout(180 * time.Second))
 			r.Post("/jobs/{id}/draft", rh.DraftFragmentTrigger)
 			r.Post("/jobs/{id}/cover-letter/draft", rh.DraftCoverLetter)
+			r.Post("/jobs/{id}/challenge/draft", rh.DraftChallenge)
 		})
 	})
 

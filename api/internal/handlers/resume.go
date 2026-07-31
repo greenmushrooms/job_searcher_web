@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/greenmushrooms/job_searcher_web/api/internal/challenges"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
@@ -31,6 +32,7 @@ type ResumeHandler struct {
 	Jobs          *jobs.Repo
 	Finalizations *finalizations.Repo
 	CoverLetters  *coverletters.Repo
+	Challenges    *challenges.Repo   // practice exercises built from the posting
 	Master        *resumemaster.Repo // permanent master résumé markdown (diff lab)
 	Resumes       *resume.Repo       // writes to the canonical resume (left editor)
 	Templates     *templates.Repo    // reusable resume variants
