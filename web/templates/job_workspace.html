@@ -24,4 +24,19 @@
       <div class="ws-loading">loading…</div>
     </div>
   </details>
+
+  {{- /* Practice exercise built from this posting's stated technical
+         requirements. Behind the per-profile "practice" feature flag, and
+         lazy-loaded like the others so opening a job doesn't pay for a panel
+         most visits ignore. */}}
+  {{- if .Practice }}
+  <details class="ws-section">
+    <summary>🎯 Practice</summary>
+    <div class="challenge-panel" id="job-challenge"
+         hx-get="/ui/jobs/{{ .JobID }}/challenge?profile={{ .Profile }}"
+         hx-trigger="load" hx-swap="innerHTML">
+      <div class="ws-loading">loading…</div>
+    </div>
+  </details>
+  {{- end }}
 </div>

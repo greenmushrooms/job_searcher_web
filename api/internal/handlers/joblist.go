@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/applications"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/features"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/jobs"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/render"
@@ -24,6 +26,7 @@ type JobUIHandler struct {
 	Jobs      *jobs.Repo
 	Apps      *applications.Repo
 	Templates *templates.Repo
+	Pool      *pgxpool.Pool // per-profile feature flags
 	Renderer  *render.Renderer
 }
 
@@ -144,6 +147,7 @@ type jobWorkspaceView struct {
 	Profile  string
 	Summary  jobSummaryView
 	Controls resumeControlsView
+	Practice bool // per-profile feature flag; section is hidden when off
 }
 
 // JobWorkspace handles GET /ui/jobs/{id}/workspace — the per-job right pane:
@@ -171,6 +175,7 @@ func (h *JobUIHandler) JobWorkspace(w http.ResponseWriter, r *http.Request) {
 		Profile:  profile,
 		Summary:  toSummaryView(*j, profile),
 		Controls: controls,
+		Practice: features.Enabled(r.Context(), h.Pool, profile, features.Practice),
 	})
 }
 

@@ -1,0 +1,129 @@
+{{- /* Practice-exercise pane, swapped into #job-challenge inside the
+       workspace's collapsible "Practice" section. Empty state offers the
+       generate trigger; once an exercise exists it shows the brief, the file
+       list, and a zip download. The reference solution is behind its own
+       request so it never ships with the exercise. */ -}}
+<div class="challenge">
+  <form class="challenge-form" hx-target="#job-challenge" hx-swap="innerHTML">
+    <input type="hidden" name="profile" value="{{ .Profile }}">
+
+    {{- if not .Has }}
+    <div class="draft-empty">
+      <p>No practice exercise for this job yet.</p>
+      <button type="button" class="draft-trigger"
+              hx-post="/ui/jobs/{{ .JobID }}/challenge/draft"
+              hx-include="closest form"
+              hx-indicator="#challenge-spinner"
+              hx-disabled-elt="this">
+        🎯 Build a practice exercise
+      </button>
+      <span id="challenge-spinner" class="htmx-indicator ai-progress"
+            data-phases="reading what they screen for|designing the exercise|writing the failing tests|planting the bug">building…</span>
+      <div class="draft-hint">DeepSeek reads this posting's stated technical requirements and writes a ~30&nbsp;minute Python exercise: a failing pytest suite as the spec, plus a deliberate bug planted in one module that you are not told about. Standard library only — <code>pytest</code> is the only command you need.</div>
+    </div>
+    {{- else }}
+    <div class="ch-head">
+      <h4 class="ch-title">{{ .Title }}</h4>
+      <div class="cl-meta">
+        {{- if .Minutes }}<span class="meta-item"><b>budget</b> {{ .Minutes }} min</span>{{ end }}
+        {{- if .Model }}<span class="meta-item"><b>model</b> {{ .Model }}</span>{{ end }}
+        {{- if .Updated }}<span class="meta-item"><b>built</b> {{ .Updated }}</span>{{ end }}
+      </div>
+      {{- if .Skills }}
+      <div class="ch-skills">
+        {{- range .Skills }}<span class="ch-skill">{{ . }}</span>{{ end }}
+      </div>
+      {{- end }}
+    </div>
+
+    <div class="ch-brief">{{ .Brief }}</div>
+
+    <div class="ch-files">
+      <b>Files</b>
+      <ul>
+        {{- range .Files }}<li><code>{{ .Path }}</code></li>{{ end }}
+      </ul>
+    </div>
+
+    <div class="cl-actions">
+      {{- /* Native GET in a new tab: streams the zip as a download. */}}
+      <a class="draft-finalize" href="/ui/jobs/{{ .JobID }}/challenge.zip?profile={{ .Profile }}"
+         target="_blank" rel="noopener">⬇️ Download exercise</a>
+      <button type="button" class="small secondary"
+              hx-post="/ui/jobs/{{ .JobID }}/challenge/draft"
+              hx-include="closest form"
+              hx-confirm="Build a new exercise? This replaces the current one."
+              hx-indicator="#challenge-spinner"
+              hx-disabled-elt="this">↻ new exercise</button>
+      {{- if not .Solution }}
+      <button type="button" class="small"
+              hx-post="/ui/jobs/{{ .JobID }}/challenge/solution"
+              hx-include="closest form"
+              hx-confirm="Show the reference solution? Try it first — the diagnostic rep is the point.">🔑 reveal solution</button>
+      {{- end }}
+      <span id="challenge-spinner" class="htmx-indicator ai-progress"
+            data-phases="reading what they screen for|designing the exercise|writing the failing tests|planting the bug">building…</span>
+      {{- if .Note }}<span class="cl-note">{{ .Note }}</span>{{ end }}
+    </div>
+
+    {{- if .Solution }}
+    <details class="ch-solution" open>
+      <summary>Reference solution</summary>
+      {{- range .Solution }}
+      <div class="ch-solution-file">
+        <code>{{ .Path }}</code>
+        <pre>{{ .Content }}</pre>
+      </div>
+      {{- end }}
+    </details>
+    {{- end }}
+    {{- end }}
+  </form>
+
+    {{- /* Upload the run log the exercise's conftest.py wrote. Multipart, so
+         it's its own form — nested forms aren't legal HTML. */}}
+  {{- if .Has }}
+  <div class="ch-attempt-upload">
+    <b>Log an attempt</b>
+    <form hx-post="/ui/jobs/{{ .JobID }}/challenge/attempt"
+          hx-target="#job-challenge" hx-swap="innerHTML"
+          hx-encoding="multipart/form-data">
+      <input type="hidden" name="profile" value="{{ .Profile }}">
+      <input type="file" name="log" accept=".jsonl,application/json,text/plain" required>
+      <button type="submit" class="small">⬆️ Upload .attempts.jsonl</button>
+    </form>
+    <div class="draft-hint">
+      {{- if .Scoreable }}
+      Scored on whether you localised the planted bug before doing the obvious stub work — no self-reporting.
+      {{- else }}
+      This exercise predates bug-test tracking, so the ordering signal will show as unknown. Re-roll it to get scoring.
+      {{- end }}
+    </div>
+  </div>
+  {{- end }}
+
+  {{- /* History renders whether or not an exercise currently exists here:
+         attempts sync between hub and box but exercises deliberately don't,
+         so a machine can legitimately hold your record without the drill. */}}
+  {{- if .Attempts }}
+  <div class="ch-attempts">
+    <b>Attempts</b>
+    <table>
+      <tr><th>started</th><th>runs</th><th>result</th><th>min</th><th>bug first?</th></tr>
+      {{- range .Attempts }}
+      <tr>
+        <td>{{ .StartedAt.Format "2006-01-02 15:04" }}</td>
+        <td>{{ .Runs }}</td>
+        <td>{{ if .Solved }}✅ {{ .FinalPass }}/{{ .TotalTests }}{{ else }}⏳ {{ .FinalPass }}/{{ .TotalTests }}{{ end }}</td>
+        <td>{{ if .Solved }}{{ printf "%.0f" .MinutesToGreen }}{{ else }}—{{ end }}</td>
+        <td>
+          {{- if .BugFirst }}{{ if eq (printf "%v" .BugFirst) "true" }}✓ yes{{ else }}✗ no{{ end }}
+          {{- else }}—{{ end }}
+          {{- if .RevealedSoln }} <span class="ch-revealed">(solution revealed)</span>{{ end }}
+        </td>
+      </tr>
+      {{- end }}
+    </table>
+  </div>
+  {{- end }}
+</div>
