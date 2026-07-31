@@ -28,6 +28,8 @@ type Challenge struct {
 	Minutes       int                      `json:"minutes"`
 	Files         []deepseek.ChallengeFile `json:"files"`
 	Solution      []deepseek.ChallengeFile `json:"solution"`
+	BugModule     string                   `json:"bug_module"` // scoring only — never rendered
+	BugTests      []string                 `json:"bug_tests"`
 	Model         string                   `json:"model"`
 	PromptVersion string                   `json:"prompt_version"`
 	UpdatedAt     string                   `json:"updated_at"`
@@ -61,14 +63,18 @@ func (r *Repo) Save(ctx context.Context, jobID, sysProfile string, ch *Challenge
 	if skills == nil {
 		skills = []string{}
 	}
+	bugTests := ch.BugTests
+	if bugTests == nil {
+		bugTests = []string{}
+	}
 
 	var out Challenge
 	var filesRaw, solutionRaw []byte
 	err = r.q.QueryRow(ctx, `
         INSERT INTO web.jobs_challenge
             (job_id, sys_profile, title, brief, skills, minutes, files, solution,
-             model, prompt_version, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+             bug_module, bug_tests, model, prompt_version, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
         ON CONFLICT (job_id, sys_profile) DO UPDATE
         SET title          = EXCLUDED.title,
             brief          = EXCLUDED.brief,
@@ -76,15 +82,19 @@ func (r *Repo) Save(ctx context.Context, jobID, sysProfile string, ch *Challenge
             minutes        = EXCLUDED.minutes,
             files          = EXCLUDED.files,
             solution       = EXCLUDED.solution,
+            bug_module     = EXCLUDED.bug_module,
+            bug_tests      = EXCLUDED.bug_tests,
             model          = EXCLUDED.model,
             prompt_version = EXCLUDED.prompt_version,
             updated_at     = NOW()
         RETURNING job_id, sys_profile, title, brief, skills, minutes,
-                  files, solution, model, prompt_version, updated_at::text
+                  files, solution, bug_module, bug_tests, model, prompt_version,
+                  updated_at::text
     `, jobID, sysProfile, ch.Title, ch.Brief, skills, ch.Minutes, files, solution,
-		ch.Model, ch.PromptVersion).Scan(
+		ch.BugModule, bugTests, ch.Model, ch.PromptVersion).Scan(
 		&out.JobID, &out.SysProfile, &out.Title, &out.Brief, &out.Skills, &out.Minutes,
-		&filesRaw, &solutionRaw, &out.Model, &out.PromptVersion, &out.UpdatedAt,
+		&filesRaw, &solutionRaw, &out.BugModule, &out.BugTests, &out.Model,
+		&out.PromptVersion, &out.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert jobs_challenge: %w", err)
@@ -111,12 +121,14 @@ func (r *Repo) Get(ctx context.Context, jobID, sysProfile string) (*Challenge, e
 	var filesRaw, solutionRaw []byte
 	err := r.q.QueryRow(ctx, `
         SELECT job_id, sys_profile, title, brief, skills, minutes,
-               files, solution, model, prompt_version, updated_at::text
+               files, solution, bug_module, bug_tests, model, prompt_version,
+               updated_at::text
         FROM web.jobs_challenge
         WHERE job_id = $1 AND sys_profile = $2
     `, jobID, sysProfile).Scan(
 		&out.JobID, &out.SysProfile, &out.Title, &out.Brief, &out.Skills, &out.Minutes,
-		&filesRaw, &solutionRaw, &out.Model, &out.PromptVersion, &out.UpdatedAt,
+		&filesRaw, &solutionRaw, &out.BugModule, &out.BugTests, &out.Model,
+		&out.PromptVersion, &out.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

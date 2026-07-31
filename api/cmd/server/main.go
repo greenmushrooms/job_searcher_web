@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/greenmushrooms/job_searcher_web/api/internal/applications"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/attempts"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/challenges"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/coverletters"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
@@ -60,6 +61,7 @@ func main() {
 	finalsRepo := finalizations.New(pool)
 	coverRepo := coverletters.New(pool)
 	challengeRepo := challenges.New(pool)
+	attemptRepo := attempts.New(pool)
 	masterRepo := resumemaster.New(pool)
 	resumeRepo := resume.NewRepo(pool)
 	templatesRepo := templates.New(pool)
@@ -97,6 +99,7 @@ func main() {
 		Finalizations: finalsRepo,
 		CoverLetters:  coverRepo,
 		Challenges:    challengeRepo,
+		Attempts:      attemptRepo,
 		Master:        masterRepo,
 		Resumes:       resumeRepo,
 		Templates:     templatesRepo,
@@ -160,6 +163,7 @@ func main() {
 			r.Get("/jobs/{id}/challenge", rh.ChallengeFragment)
 			r.Get("/jobs/{id}/challenge.zip", rh.ChallengeZip)
 			r.Post("/jobs/{id}/challenge/solution", rh.ChallengeSolution)
+			r.Post("/jobs/{id}/challenge/attempt", rh.UploadAttempt)
 			r.Post("/resume/master", rh.SaveMaster)    // diff lab: permanent master save
 			r.Post("/difflab/diff", rh.DiffLabCompute) // diff lab v4: zero-JS recompute
 

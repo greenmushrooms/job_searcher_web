@@ -12,7 +12,11 @@ import (
 // ch-v1: first cut — a ~30-minute pure-stdlib pytest exercise built from the
 // posting's stated must-haves, shipped as a failing suite with a bug planted
 // in one module so the first task is localising the fault, not writing code.
-const ChallengePromptVersion = "ch-v1"
+// ch-v2: the model now names the buggy module and the tests that bug breaks,
+// so an uploaded run log can be scored — did you localise the planted fault
+// before doing the obvious stub work — without self-reporting. Never shown to
+// the candidate; scoring data only.
+const ChallengePromptVersion = "ch-v2"
 
 // MaxChallengeMinutes caps what the model may ask for. The whole point is a
 // drill that survives a weeknight, so an "exercise" the model sizes at two
@@ -41,10 +45,14 @@ Output STRICT JSON, no markdown fence, matching exactly:
   "skills": ["the posting requirements this drills"],
   "brief": "markdown: the scenario, what to build, how to run the tests, and the rule that they must read the failing test before editing. Never name the module holding the planted bug.",
   "files": [{"path": "relative/path.py", "content": "file contents"}],
-  "solution": [{"path": "relative/path.py", "content": "reference implementation of the same path"}]
+  "solution": [{"path": "relative/path.py", "content": "reference implementation of the same path"}],
+  "bug_module": "path of the file holding the planted bug",
+  "bug_tests": ["names of the tests that fail BECAUSE of the planted bug, not because of the unimplemented stub"]
 }
 
-"files" is what the candidate gets: the stub modules, the buggy module, and the test suite. "solution" is the corrected version of every non-test file — it must make the shipped test suite pass without editing the tests.`
+"files" is what the candidate gets: the stub modules, the buggy module, and the test suite. "solution" is the corrected version of every non-test file — it must make the shipped test suite pass without editing the tests.
+
+"bug_module" and "bug_tests" are scoring data. They are never shown to the candidate. Split the failing tests honestly: a test that fails with NotImplementedError from the stub is NOT a bug_test; a test that fails because the already-written module computes the wrong answer IS. Use bare test function names.`
 
 // ChallengeFile is one generated file: a path relative to the exercise root
 // and its full contents.
@@ -61,6 +69,8 @@ type ChallengeResult struct {
 	Brief         string          `json:"brief"`
 	Files         []ChallengeFile `json:"files"`
 	Solution      []ChallengeFile `json:"solution"`
+	BugModule     string          `json:"bug_module"` // scoring only — never rendered
+	BugTests      []string        `json:"bug_tests"`  // tests the planted bug breaks
 	Usage         Usage           `json:"usage"`
 	Model         string          `json:"model"`
 	PromptVersion string          `json:"prompt_version"`
@@ -159,7 +169,44 @@ func validateChallenge(ch *ChallengeResult) error {
 	if impl == 0 {
 		return fmt.Errorf("challenge ships no implementation file to work on")
 	}
+	normalizeScoring(ch)
 	return nil
+}
+
+// normalizeScoring drops bug_module/bug_tests that don't correspond to the
+// generated files. Deliberately lenient: the exercise is the product and the
+// scoring data is a bonus, so bad metadata makes an attempt unscoreable rather
+// than throwing away a perfectly good exercise.
+func normalizeScoring(ch *ChallengeResult) {
+	paths := make(map[string]bool, len(ch.Files))
+	var testSrc strings.Builder
+	for _, f := range ch.Files {
+		paths[f.Path] = true
+		base := f.Path
+		if i := strings.LastIndex(base, "/"); i >= 0 {
+			base = base[i+1:]
+		}
+		if strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py") {
+			testSrc.WriteString(f.Content)
+		}
+	}
+	if !paths[ch.BugModule] {
+		ch.BugModule = ""
+	}
+	// A named test we can't find in any test file would silently never go
+	// green, which would score every attempt as a failure to localise.
+	src := testSrc.String()
+	kept := make([]string, 0, len(ch.BugTests))
+	for _, name := range ch.BugTests {
+		if n := strings.TrimSpace(name); n != "" && strings.Contains(src, n) {
+			kept = append(kept, n)
+		}
+	}
+	ch.BugTests = kept
+	if ch.BugModule == "" || len(ch.BugTests) == 0 {
+		// Partial scoring data is worse than none — it reads as authoritative.
+		ch.BugModule, ch.BugTests = "", nil
+	}
 }
 
 // ValidateChallengePath keeps generated paths inside the exercise directory.
