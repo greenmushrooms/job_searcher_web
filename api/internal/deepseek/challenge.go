@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // ChallengePromptVersion is logged into every challenge_drafted event, same
@@ -16,7 +19,25 @@ import (
 // so an uploaded run log can be scored — did you localise the planted fault
 // before doing the obvious stub work — without self-reporting. Never shown to
 // the candidate; scoring data only.
-const ChallengePromptVersion = "ch-v2"
+// ch-v3: both v1 and v2 generations annotated the planted bug in the source
+// ("# BUG: off-by-one, should return all"), which defeats the whole exercise —
+// grep finds the fault instantly and the diagnostic rep never happens. v1/v2
+// only forbade naming it in the BRIEF; the model complied literally and
+// commented the code instead. v3 forbids marking it anywhere, and the
+// validator enforces that mechanically rather than trusting the instruction.
+// v3 also sets a size floor: v2 shipped 13 lines of implementation while
+// declaring itself a 30-minute exercise.
+const ChallengePromptVersion = "ch-v3"
+
+// ChallengeTimeout is the wall budget for one generation. Much longer than the
+// other DeepSeek calls because ch-v3 asks for real substance — two modules,
+// 40+ implementation lines, five tests, plus a full reference solution — with
+// chain-of-thought left on. Measured: ch-v2 (13 impl lines, 3 tests) took ~95s;
+// the v3 ask overran the shared client's 170s cap on the first attempt.
+// Thinking stays enabled here on purpose: designing a bug that is subtle AND a
+// suite that pins it is exactly the work CoT pays for, unlike the résumé diff
+// where it was disabled for being all cost and no benefit.
+const ChallengeTimeout = 8 * time.Minute
 
 // MaxChallengeMinutes caps what the model may ask for. The whole point is a
 // drill that survives a weeknight, so an "exercise" the model sizes at two
@@ -33,8 +54,10 @@ Hard requirements:
 - Python 3.11+, standard library ONLY, plus pytest. Never import pandas, numpy, requests, or anything else unless the posting itself names that library as a core requirement.
 - The whole exercise must be completable in 30 minutes by a competent engineer. Small and sharp beats broad.
 - Ship a FAILING pytest suite. The tests are the specification: reading them is how the candidate learns what to build.
-- Plant exactly ONE deliberate bug in a module that is otherwise already written, and do NOT say which module in the brief. The candidate's first job is to read the failing test output and localise the fault. Make the bug plausible — an off-by-one, a wrong accumulator, a mutated shared default, a swapped branch — never a syntax error or an obvious placeholder.
-- Include at least one module that is genuinely incomplete (raises NotImplementedError or returns a wrong stub), so there is real code to write as well as a bug to find.
+- Plant exactly ONE deliberate bug in a module that is otherwise already written. Make it plausible — an off-by-one, a wrong accumulator, a mutated shared default, a swapped branch, an inverted condition — never a syntax error or an obvious placeholder.
+- CRITICAL: never mark, hint at, or comment on the planted bug ANYWHERE in the shipped files. No "# BUG", no "# FIXME", no "# this is wrong", no "# should be", no suspicious TODO next to it. The buggy line must read exactly like code someone wrote believing it was correct. A candidate who greps the source must find nothing; the only route to it is reading the failing test. This is the single most important rule here — an annotated bug makes the whole exercise worthless.
+- Include at least one module that is genuinely incomplete (raises NotImplementedError), so there is real code to write as well as a bug to find. Marking THAT is fine and expected — it is the obvious work, not the hidden fault.
+- Size it honestly to the stated minutes: at least 2 implementation modules totalling 40+ non-blank lines, and at least 5 test functions. A 40-line exercise is not a 30-minute exercise.
 - Tests must be deterministic. No randomness, no clocks, no network, no filesystem writes outside tmp_path.
 - Every file must be runnable as written: 'pytest' in the exercise directory is the only command needed.
 
@@ -52,7 +75,7 @@ Output STRICT JSON, no markdown fence, matching exactly:
 
 "files" is what the candidate gets: the stub modules, the buggy module, and the test suite. "solution" is the corrected version of every non-test file — it must make the shipped test suite pass without editing the tests.
 
-"bug_module" and "bug_tests" are scoring data. They are never shown to the candidate. Split the failing tests honestly: a test that fails with NotImplementedError from the stub is NOT a bug_test; a test that fails because the already-written module computes the wrong answer IS. Use bare test function names.`
+"bug_module" and "bug_tests" are scoring data returned in JSON only. They are never shown to the candidate and must not be inferable from the shipped source. Split the failing tests honestly: a test that fails with NotImplementedError from the stub is NOT a bug_test; a test that fails because the already-written module computes the wrong answer IS. Use bare test function names.`
 
 // ChallengeFile is one generated file: a path relative to the exercise root
 // and its full contents.
@@ -92,7 +115,15 @@ func (c *Client) Challenge(ctx context.Context, title, company, jobDescription s
 		// coherent bug + matching test suite is exactly the kind of task the
 		// chain-of-thought pays for.
 	}
-	raw, err := c.post(ctx, "/chat/completions", reqBody)
+	// The shared HTTPClient's 170s cap is fine for every other call and too
+	// short for this one, so borrow the client with a longer deadline rather
+	// than raising the ceiling for calls that don't need it.
+	slow := *c
+	slow.HTTPClient = &http.Client{Timeout: ChallengeTimeout}
+	ctx, cancel := context.WithTimeout(ctx, ChallengeTimeout)
+	defer cancel()
+
+	raw, err := slow.post(ctx, "/chat/completions", reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -152,14 +183,10 @@ func validateChallenge(ch *ChallengeResult) error {
 		}
 	}
 	for _, f := range ch.Files {
-		base := f.Path
-		if i := strings.LastIndex(base, "/"); i >= 0 {
-			base = base[i+1:]
-		}
 		switch {
-		case strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py"):
+		case isTestPath(f.Path):
 			tests++
-		case strings.HasSuffix(base, ".py"):
+		case strings.HasSuffix(f.Path, ".py"):
 			impl++
 		}
 	}
@@ -169,8 +196,89 @@ func validateChallenge(ch *ChallengeResult) error {
 	if impl == 0 {
 		return fmt.Errorf("challenge ships no implementation file to work on")
 	}
+	if err := checkBugNotAnnotated(ch); err != nil {
+		return err
+	}
+	if err := checkSubstantial(ch, impl); err != nil {
+		return err
+	}
 	normalizeScoring(ch)
 	return nil
+}
+
+// bugMarker matches a comment that gives the planted fault away. Word-bounded
+// so "debug"/"debugging" don't trip it, and only applied to comment text —
+// an exercise about parsing bug-tracker records is legitimate.
+var bugMarker = regexp.MustCompile(`(?i)\b(bug|fixme|broken|off.by.one|intentional(ly)?|deliberate(ly)?|on purpose|should (be|return|have)|wrong here|incorrect here)\b`)
+
+// checkBugNotAnnotated is the mechanical enforcement of the one rule the model
+// keeps breaking. ch-v1 and ch-v2 both shipped a literal "# BUG: off-by-one,
+// should return all" next to the planted fault, which reduces the exercise to
+// a grep. The instruction alone demonstrably does not hold, so the generation
+// is rejected rather than trusted.
+//
+// Test files are exempt: a test may legitimately say "should return 5", and the
+// tests are the spec the candidate is meant to read anyway.
+func checkBugNotAnnotated(ch *ChallengeResult) error {
+	for _, f := range ch.Files {
+		if isTestPath(f.Path) {
+			continue
+		}
+		for i, line := range strings.Split(f.Content, "\n") {
+			hash := strings.Index(line, "#")
+			if hash < 0 {
+				continue
+			}
+			comment := line[hash:]
+			// A stub marker is the obvious work, not the hidden fault.
+			if strings.Contains(strings.ToUpper(comment), "TODO") &&
+				strings.Contains(f.Content, "NotImplementedError") {
+				continue
+			}
+			if m := bugMarker.FindString(comment); m != "" {
+				return fmt.Errorf("challenge annotates its own bug at %s:%d (%q) — that reduces the exercise to a grep", f.Path, i+1, m)
+			}
+		}
+	}
+	return nil
+}
+
+// checkSubstantial rejects an exercise too small for the time it claims. ch-v2
+// shipped 13 lines of implementation and called itself 30 minutes.
+func checkSubstantial(ch *ChallengeResult, implFiles int) error {
+	implLines, testFuncs := 0, 0
+	for _, f := range ch.Files {
+		if isTestPath(f.Path) {
+			testFuncs += strings.Count(f.Content, "\ndef test_") + strings.Count(f.Content, "\n    def test_")
+			if strings.HasPrefix(f.Content, "def test_") {
+				testFuncs++
+			}
+			continue
+		}
+		for _, line := range strings.Split(f.Content, "\n") {
+			if strings.TrimSpace(line) != "" {
+				implLines++
+			}
+		}
+	}
+	if implFiles < 2 {
+		return fmt.Errorf("challenge ships %d implementation module(s), want at least 2 so the fault has somewhere to hide", implFiles)
+	}
+	if implLines < 40 {
+		return fmt.Errorf("challenge ships %d non-blank implementation lines, too small for a %d-minute exercise", implLines, ch.Minutes)
+	}
+	if testFuncs < 5 {
+		return fmt.Errorf("challenge ships %d test functions, want at least 5 — the suite is the specification", testFuncs)
+	}
+	return nil
+}
+
+func isTestPath(p string) bool {
+	base := p
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py") || base == "conftest.py"
 }
 
 // normalizeScoring drops bug_module/bug_tests that don't correspond to the

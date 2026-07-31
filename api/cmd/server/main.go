@@ -192,6 +192,11 @@ func main() {
 			r.Use(middleware.Timeout(180 * time.Second))
 			r.Post("/jobs/{id}/draft", rh.DraftFragmentTrigger)
 			r.Post("/jobs/{id}/cover-letter/draft", rh.DraftCoverLetter)
+		})
+		// Challenge generation is its own budget: ch-v3 asks for a substantial
+		// exercise with CoT on, which overruns the 180s group above.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Timeout(deepseek.ChallengeTimeout + 30*time.Second))
 			r.Post("/jobs/{id}/challenge/draft", rh.DraftChallenge)
 		})
 	})
