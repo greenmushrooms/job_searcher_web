@@ -93,7 +93,7 @@ func main() {
 	obh := &handlers.OnboardingHandler{Pool: pool, Renderer: renderer}
 	ah := &handlers.ApplicationsHandler{Repo: appsRepo}
 	uh := &handlers.UIHandler{Repo: appsRepo, Renderer: renderer}
-	juh := &handlers.JobUIHandler{Jobs: jobsRepo, Apps: appsRepo, Templates: templatesRepo, Renderer: renderer}
+	juh := &handlers.JobUIHandler{Jobs: jobsRepo, Apps: appsRepo, Templates: templatesRepo, Pool: pool, Renderer: renderer}
 	rh := &handlers.ResumeHandler{
 		Jobs:          jobsRepo,
 		Finalizations: finalsRepo,

@@ -77,10 +77,12 @@
       {{- end }}
     </details>
     {{- end }}
+    {{- end }}
   </form>
 
     {{- /* Upload the run log the exercise's conftest.py wrote. Multipart, so
          it's its own form — nested forms aren't legal HTML. */}}
+  {{- if .Has }}
   <div class="ch-attempt-upload">
     <b>Log an attempt</b>
     <form hx-post="/ui/jobs/{{ .JobID }}/challenge/attempt"
@@ -98,7 +100,11 @@
       {{- end }}
     </div>
   </div>
+  {{- end }}
 
+  {{- /* History renders whether or not an exercise currently exists here:
+         attempts sync between hub and box but exercises deliberately don't,
+         so a machine can legitimately hold your record without the drill. */}}
   {{- if .Attempts }}
   <div class="ch-attempts">
     <b>Attempts</b>
@@ -119,6 +125,5 @@
       {{- end }}
     </table>
   </div>
-  {{- end }}
   {{- end }}
 </div>

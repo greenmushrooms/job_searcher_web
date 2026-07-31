@@ -13,6 +13,7 @@ import (
 	"github.com/greenmushrooms/job_searcher_web/api/internal/challenges"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/db"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/deepseek"
+	"github.com/greenmushrooms/job_searcher_web/api/internal/features"
 	"github.com/greenmushrooms/job_searcher_web/api/internal/profiles"
 )
 
@@ -35,11 +36,24 @@ type challengeView struct {
 	Note      string
 }
 
+// practiceEnabled gates every challenge route on the per-profile flag. Hiding
+// the workspace section is presentation; this is the control — the endpoints
+// stay unreachable for a profile that hasn't opted in, so a guessed URL or a
+// stale open tab can't drive an LLM call on someone else's behalf.
+func (h *ResumeHandler) practiceEnabled(r *http.Request, profile string) bool {
+	return features.Enabled(r.Context(), h.Pool, profile, features.Practice)
+}
+
 // ChallengeFragment handles GET /ui/jobs/{id}/challenge — the saved exercise
 // if one exists, else the empty state with the generate trigger.
 func (h *ResumeHandler) ChallengeFragment(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
+
+	if !h.practiceEnabled(r, profile) {
+		writeErr(w, http.StatusNotFound, "practice is not enabled for this profile")
+		return
+	}
 
 	view := challengeView{JobID: jobID, Profile: profile}
 	ch, err := h.Challenges.Get(r.Context(), jobID, profile)
@@ -49,8 +63,11 @@ func (h *ResumeHandler) ChallengeFragment(w http.ResponseWriter, r *http.Request
 	}
 	if ch != nil {
 		fillChallengeView(&view, ch)
-		h.loadAttempts(r, &view)
 	}
+	// Outside the nil check on purpose: attempts sync between hub and box but
+	// exercises deliberately don't, so a machine can hold your practice record
+	// without holding the drill. Hiding the history there would look like loss.
+	h.loadAttempts(r, &view)
 	h.Renderer.HTML(w, http.StatusOK, "challenge", view)
 }
 
@@ -66,6 +83,10 @@ func (h *ResumeHandler) DraftChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 
+	if !h.practiceEnabled(r, profile) {
+		writeErr(w, http.StatusNotFound, "practice is not enabled for this profile")
+		return
+	}
 	if h.DeepSeek == nil {
 		writeErr(w, http.StatusServiceUnavailable, "DeepSeek not configured (set DEEPSEEK_API_KEY)")
 		return
@@ -144,6 +165,10 @@ func (h *ResumeHandler) ChallengeSolution(w http.ResponseWriter, r *http.Request
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 
+	if !h.practiceEnabled(r, profile) {
+		writeErr(w, http.StatusNotFound, "practice is not enabled for this profile")
+		return
+	}
 	ch, err := h.Challenges.Get(r.Context(), jobID, profile)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "load challenge: "+err.Error())
@@ -174,6 +199,10 @@ func (h *ResumeHandler) ChallengeZip(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	profile := profiles.Resolve(r.Context(), r.URL.Query().Get("profile"))
 
+	if !h.practiceEnabled(r, profile) {
+		writeErr(w, http.StatusNotFound, "practice is not enabled for this profile")
+		return
+	}
 	ch, err := h.Challenges.Get(r.Context(), jobID, profile)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "load challenge: "+err.Error())
@@ -286,6 +315,10 @@ func (h *ResumeHandler) UploadAttempt(w http.ResponseWriter, r *http.Request) {
 	}
 	profile := profiles.Resolve(r.Context(), r.FormValue("profile"))
 
+	if !h.practiceEnabled(r, profile) {
+		writeErr(w, http.StatusNotFound, "practice is not enabled for this profile")
+		return
+	}
 	ch, err := h.Challenges.Get(r.Context(), jobID, profile)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "load challenge: "+err.Error())
