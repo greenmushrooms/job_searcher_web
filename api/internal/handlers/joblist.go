@@ -119,6 +119,10 @@ func (h *JobUIHandler) JobList(w http.ResponseWriter, r *http.Request) {
 		v == "interview" || v == "skipped" || v == "rejected" || v == "offer" {
 		p.Status = v
 	}
+	if v := q.Get("verdict"); v == "Step Up" || v == "Lateral" ||
+		v == "Title Regression" || v == "Pivot" {
+		p.Verdict = v
+	}
 	// Free-text search behaves like an email search box: a query matches across
 	// title/company/location regardless of score or date, so drop the score
 	// floor and the default date window when one is present.

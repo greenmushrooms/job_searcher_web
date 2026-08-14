@@ -59,6 +59,10 @@ type ListParams struct {
 	// set, the handler relaxes the score floor and date window so a match
 	// surfaces regardless of how it scored or when it was evaluated.
 	Q string
+	// Verdict filters on the evaluator's call — "Step Up", "Lateral",
+	// "Title Regression", "Pivot". Empty means all. This is a post-hoc view
+	// filter: it never changes how a job scored, so ranking stays comparable.
+	Verdict string
 }
 
 const baseSelect = `
@@ -145,6 +149,15 @@ func listSuffix(p ListParams) (string, []any) {
 		args = append(args, "%"+p.Q+"%")
 		idx := "$" + strconv.Itoa(len(args))
 		where = append(where, "(j.title ILIKE "+idx+" OR j.company ILIKE "+idx+" OR j.location ILIKE "+idx+")")
+	}
+
+	if p.Verdict != "" {
+		// Pull the verdict out as text rather than casting reasoning to jsonb:
+		// a handful of pre-2026-03-23 rows stored raw model output that isn't
+		// valid JSON, and a cast would error the whole query rather than skip
+		// them.
+		args = append(args, p.Verdict)
+		where = append(where, `substring(e.reasoning from '"verdict"\s*:\s*"([^"]+)"') = $`+strconv.Itoa(len(args)))
 	}
 
 	args = append(args, p.Limit, p.Offset)

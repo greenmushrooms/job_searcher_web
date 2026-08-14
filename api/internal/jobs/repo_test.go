@@ -186,3 +186,41 @@ func TestParseAmount(t *testing.T) {
 		})
 	}
 }
+
+func TestListLite_VerdictFilter(t *testing.T) {
+	fq := &fakeQuerier{}
+	repo := New(fq)
+	p := ListParams{Profile: "Cait", MinScore: 6.9, Limit: 50, DateField: "eval", Verdict: "Step Up"}
+	if _, err := repo.ListLite(context.Background(), p); err != nil {
+		t.Fatalf("ListLite: %v", err)
+	}
+	// Extracted as text, not cast to jsonb: some pre-2026-03-23 rows hold raw
+	// model output that isn't valid JSON, and a cast would error the query.
+	if strings.Contains(fq.lastSQL, "reasoning::jsonb") {
+		t.Errorf("verdict filter must not cast reasoning to jsonb:\n%s", fq.lastSQL)
+	}
+	if !strings.Contains(fq.lastSQL, `substring(e.reasoning from '"verdict"`) {
+		t.Errorf("SQL missing verdict extraction:\n%s", fq.lastSQL)
+	}
+	// Verdict binds after profile/min_score, before limit/offset.
+	wantArgs := []any{"Cait", 6.9, "Step Up", 50, 0}
+	if len(fq.lastArgs) != len(wantArgs) {
+		t.Fatalf("args: got %v, want %v", fq.lastArgs, wantArgs)
+	}
+	for i := range wantArgs {
+		if fq.lastArgs[i] != wantArgs[i] {
+			t.Errorf("arg[%d]: got %v, want %v", i, fq.lastArgs[i], wantArgs[i])
+		}
+	}
+}
+
+func TestListLite_NoVerdictFilterByDefault(t *testing.T) {
+	fq := &fakeQuerier{}
+	repo := New(fq)
+	if _, err := repo.ListLite(context.Background(), ListParams{Profile: "Cait", MinScore: 6.9, Limit: 50}); err != nil {
+		t.Fatalf("ListLite: %v", err)
+	}
+	if strings.Contains(fq.lastSQL, "verdict") {
+		t.Errorf("empty Verdict should add no clause:\n%s", fq.lastSQL)
+	}
+}

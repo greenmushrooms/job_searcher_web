@@ -238,6 +238,15 @@
           <label><input type="radio" name="status" value="offer">Offer</label>
           <label><input type="radio" name="status" value="rejected">Rejected</label>
         </div>
+        <!-- Verdict is a view filter only: it narrows what's listed, never how
+             anything scored, so the ranking stays comparable across choices. -->
+        <div class="status-tabs">
+          <label><input type="radio" name="verdict" value="" checked>Any fit</label>
+          <label><input type="radio" name="verdict" value="Step Up">Step Up</label>
+          <label><input type="radio" name="verdict" value="Lateral">Lateral</label>
+          <label><input type="radio" name="verdict" value="Title Regression">Title regression</label>
+          <label><input type="radio" name="verdict" value="Pivot">Pivot</label>
+        </div>
         <div class="filter-row">
           <label>since
             <select name="days">
